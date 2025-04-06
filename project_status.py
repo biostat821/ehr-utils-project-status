@@ -2,8 +2,10 @@
 """Utilities for analyzing and reporting EHR project status."""
 
 import argparse
+import csv
 import math
 import os
+import re
 import textwrap
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -118,6 +120,30 @@ class Merge(Event):
         return f"{self.creation_time} & MERGED"
 
 
+@dataclass
+class Extension:
+    name: str
+    username: str
+    phase: int
+    due_date: datetime
+
+
+def get_extensions(filename: str) -> list[Extension]:
+    """Read extensions from file."""
+    with open(filename) as f:
+        csvreader = csv.reader(f)
+        phase_pattern = re.compile("phase(\d)")
+        extensions = []
+        for row in csvreader:
+            match = phase_pattern.match(row[2])
+            if match is None:
+                raise ValueError("invalid phase in extension file")
+            extensions.append(
+                Extension(row[0], row[1], int(match.group(1)), et_datetime(row[3]))
+            )
+    return extensions
+
+
 class EhrProjectStatus:
     """Multitool for managing EHR projects on GitHub."""
 
@@ -129,6 +155,10 @@ class EhrProjectStatus:
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {self.auth_token}",
             "X-GitHub-Api-Version": "2022-11-28",
+        }
+        self.extensions = {
+            (extension.username, extension.phase): extension
+            for extension in get_extensions("extensions.csv")
         }
 
     def repo_name(self: Self, username: str):
@@ -142,14 +172,24 @@ class EhrProjectStatus:
         datetime(2025, 4, 9, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
     ]
 
-    def generate_pr_summary(self, pr: PullRequest, due_date: datetime) -> str:
-        document = textwrap.dedent(f"""
-                                    approval due {due_date.strftime("%Y-%m-%d %H:%M:%S")}
-                                    \\setlength\\LTleft{{0pt}}
-                                    \\setlength\\LTright{{0pt}}
-                                    \\begin{{longtable}}{{@{{\\extracolsep{{\\fill}}}}llr}}
+    def generate_pr_summary(self, pr: PullRequest, phase: int) -> str:
+        extension = self.extensions.get((pr.owner, phase))
+        original_due_date = self.merge_due_dates[phase - 1]
+        document = "approval due"
+        if extension:
+            document += f" \\sout{{{original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
+            due_date = extension.due_date
+            document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+            document += " (extension granted)\\\\\n"
+        else:
+            due_date = original_due_date
+            document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        document += textwrap.dedent("""
+                                    \\setlength\\LTleft{0pt}
+                                    \\setlength\\LTright{0pt}
+                                    \\begin{longtable}{@{\\extracolsep{\\fill}}llr}
                                     \\toprule
-                                    \\textbf{{timestamp}} & \\textbf{{event}} & \\textbf{{status}} \\\\
+                                    \\textbf{timestamp} & \\textbf{event} & \\textbf{status} \\\\
                                     \\midrule
                                     """).strip()
         all_events = pr.timeline_events
@@ -235,6 +275,7 @@ class EhrProjectStatus:
                     \\usepackage{{longtable}}
                     \\usepackage{{fancyhdr}}               
                     \\usepackage{{lmodern}}
+                    \\usepackage[normalem]{{ulem}}
                     \\newcommand{{\\setfont}}{{
                         \\ttfamily\\fontseries{{l}}\\selectfont\\small
                     }}
@@ -243,14 +284,14 @@ class EhrProjectStatus:
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now()}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont ehr-utils-project-status 0.1.0}}
+                    \\fancyhead[R]{{\\setfont ehr-utils-project-status 0.2.0}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
         pages = [
             f"\n\\noindent\nPhase {idx + 1}\\\\\n"
-            + self.generate_pr_summary(pr, due_date)
-            for idx, (pr, due_date) in enumerate(zip(prs, self.merge_due_dates))
+            + self.generate_pr_summary(pr, phase=idx + 1)
+            for idx, pr in enumerate(prs)
         ]
         document += "\n\\pagebreak\n".join(pages)
         document += "\n\\end{document}"
