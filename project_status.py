@@ -243,7 +243,7 @@ class EhrProjectStatus:
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now()}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont ehr_project_progress_summary 0.0.1}}
+                    \\fancyhead[R]{{\\setfont ehr-utils-project-status 0.1.0}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
