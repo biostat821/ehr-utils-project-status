@@ -267,7 +267,7 @@ class EhrProjectStatus:
 
     def generate_pr_summaries(self: Self, username: str) -> None:
         """Generate PR summaries."""
-        prs = [pr for pr in self.list_prs(username)]
+        prs = [pr for pr in self.list_prs(username) if pr.based_on_main]
         document = textwrap.dedent(f"""
                     \\documentclass{{article}}
                     \\usepackage[includehead, portrait, margin=0.5in]{{geometry}}
@@ -284,7 +284,7 @@ class EhrProjectStatus:
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now()}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont ehr-utils-project-status 0.2.0}}
+                    \\fancyhead[R]{{\\setfont ehr-utils-project-status 0.2.1}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
