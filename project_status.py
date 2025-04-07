@@ -7,6 +7,7 @@ import math
 import os
 import re
 import textwrap
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Self
@@ -69,6 +70,7 @@ class Event:
 @dataclass
 class PullRequest:
     owner: str
+    branch: str
     created_at: datetime
     title: str
     permalink: str
@@ -144,6 +146,20 @@ def get_extensions(filename: str) -> list[Extension]:
     return extensions
 
 
+def get_phase_mapping_overrides(filename: str) -> dict[str, dict[int, list[int]]]:
+    """Read phase mapping overrides from file."""
+    with open(filename) as f:
+        csvreader = csv.DictReader(f)
+        phase_mapping_overrides: dict[str, dict[int, list[int]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        for row in csvreader:
+            phase_mapping_overrides[row["username"]][int(row["pr_number"])].append(
+                int(row["phase"])
+            )
+    return phase_mapping_overrides
+
+
 class EhrProjectStatus:
     """Multitool for managing EHR projects on GitHub."""
 
@@ -160,6 +176,9 @@ class EhrProjectStatus:
             (extension.username, extension.phase): extension
             for extension in get_extensions("extensions.csv")
         }
+        self.phase_mapping_overrides = get_phase_mapping_overrides(
+            "phase_mapping_overrides.csv"
+        )
 
     def repo_name(self: Self, username: str):
         return f"ehr-utils-{username}"
@@ -193,7 +212,9 @@ class EhrProjectStatus:
                                     \\midrule
                                     """).strip()
         all_events = pr.timeline_events
-        document += f"{pr.created_at.strftime('%Y-%m-%d %H:%M:%S')} & CREATED & \\\\\n"
+        document += (
+            f"\n{pr.created_at.strftime('%Y-%m-%d %H:%M:%S')} & CREATED & \\\\\n"
+        )
         state = PrState.UNDER_DEVELOPMENT
         pr_state_machine = PrStateMachine(pr.created_at, due_date)
         for event in all_events:
@@ -265,13 +286,34 @@ class EhrProjectStatus:
                                     """).strip()
         return document
 
+    def infer_phase(self, pr: PullRequest, idx: int) -> list[int]:
+        """Infer which phase this PR is for.
+
+        idx indicates where it falls in creation order (zero-indexed).
+        """
+        if (
+            pr.owner in self.phase_mapping_overrides
+            and pr.number in self.phase_mapping_overrides[pr.owner]
+        ):
+            return self.phase_mapping_overrides[pr.owner][pr.number]
+        if pr.owner in self.phase_mapping_overrides and idx + 1 in [
+            phase
+            for phases in self.phase_mapping_overrides[pr.owner].values()
+            for phase in phases
+        ]:
+            return []
+        return [idx + 1]
+
     def generate_pr_summaries(self: Self, username: str) -> None:
         """Generate PR summaries."""
         prs = [pr for pr in self.list_prs(username) if pr.based_on_main]
+        if len(prs) > len(self.merge_due_dates):
+            raise ValueError("Too many PRs!")
         document = textwrap.dedent(f"""
                     \\documentclass{{article}}
-                    \\usepackage[includehead, portrait, margin=0.5in]{{geometry}}
+                    \\usepackage[includehead, includefoot, portrait, margin=0.5in]{{geometry}}
                     \\usepackage{{booktabs}}
+                    \\usepackage[colorlinks=true, urlcolor=blue]{{hyperref}}
                     \\usepackage{{longtable}}
                     \\usepackage{{fancyhdr}}               
                     \\usepackage{{lmodern}}
@@ -282,16 +324,23 @@ class EhrProjectStatus:
                     \\begin{{document}}
                     \\pagestyle{{fancy}}
                     \\fancyhead{{}} \\fancyfoot{{}}
-                    \\fancyhead[L]{{\\setfont {now()}}}
+                    \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont ehr-utils-project-status 0.2.1}}
+                    \\fancyhead[R]{{\\setfont ehr-utils-project-status 0.3.0}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
         pages = [
-            f"\n\\noindent\nPhase {idx + 1}\\\\\n"
-            + self.generate_pr_summary(pr, phase=idx + 1)
+            f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
+            + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
+            + f'"{pr.title}" (branch "{pr.branch}")\\\\\n'
+            + f"\\url{{{pr.permalink}}}\\\\\n"
+            + "\\\\\n"
+            + "\\textbf{inferred phase}:\\\\\n"
+            + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
+            + self.generate_pr_summary(pr, phase)
             for idx, pr in enumerate(prs)
+            for phase in self.infer_phase(pr, idx)
         ]
         document += "\n\\pagebreak\n".join(pages)
         document += "\n\\end{document}"
@@ -351,7 +400,7 @@ class EhrProjectStatus:
             key=lambda event: event.created_at,
         )
 
-    def list_prs(self: Self, username: str):
+    def list_prs(self: Self, username: str) -> list[PullRequest]:
         """Get data for non-closed PRs."""
         response = httpx.post(
             "https://api.github.com/graphql",
@@ -382,6 +431,7 @@ class EhrProjectStatus:
                                             }}
                                         }}
                                     }}
+                                    headRefName
                                     commits(first: 1) {{
                                         nodes {{
                                             commit {{
@@ -459,6 +509,7 @@ class EhrProjectStatus:
                 "permalink": pr["permalink"],
                 # it seems like baseRef can be None if the base branch has been deleted
                 "base_id": pr["baseRef"]["target"]["id"] if pr["baseRef"] else None,
+                "branch": pr["headRefName"],
                 "commit_ids": [
                     node["id"]
                     for node in pr["commits"]["nodes"][0]["commit"]["history"]["nodes"]
@@ -474,6 +525,7 @@ class EhrProjectStatus:
             [
                 PullRequest(
                     username,
+                    pr["branch"],
                     pr["created_at"],
                     pr["title"],
                     pr["permalink"],
