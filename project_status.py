@@ -133,17 +133,16 @@ class Extension:
 def get_extensions(filename: str) -> list[Extension]:
     """Read extensions from file."""
     with open(filename) as f:
-        csvreader = csv.reader(f)
-        phase_pattern = re.compile("phase(\d)")
-        extensions = []
-        for row in csvreader:
-            match = phase_pattern.match(row[2])
-            if match is None:
-                raise ValueError("invalid phase in extension file")
-            extensions.append(
-                Extension(row[0], row[1], int(match.group(1)), et_datetime(row[3]))
+        csvreader = csv.DictReader(f)
+        return [
+            Extension(
+                row["name"],
+                row["username"],
+                int(row["phase"]),
+                et_datetime(row["due"]),
             )
-    return extensions
+            for row in csvreader
+        ]
 
 
 def get_phase_mapping_overrides(filename: str) -> dict[str, dict[int, list[int]]]:
@@ -548,4 +547,4 @@ if __name__ == "__main__":
     )
     parser.add_argument("username")
     args = parser.parse_args()
-    EhrProjectStatus("biostat821-2025").generate_pr_summaries(args.username)
+    EhrProjectStatus("biostat821-2025").generate_pr_summaries(args.username.strip())
