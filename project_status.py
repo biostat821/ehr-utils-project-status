@@ -123,6 +123,12 @@ class Merge(Event):
 
 
 @dataclass
+class ClosedEvent(Event):
+    def get_summary(self: Self, verbose: bool = False) -> str:
+        return f"{self.creation_time} & CLOSED"
+
+
+@dataclass
 class Extension:
     name: str
     username: str
@@ -190,18 +196,24 @@ class EhrProjectStatus:
         datetime(2025, 4, 9, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
     ]
 
-    def generate_pr_summary(self, pr: PullRequest, phase: int) -> str:
-        extension = self.extensions.get((pr.owner, phase))
-        original_due_date = self.merge_due_dates[phase - 1]
-        document = "approval due"
-        if extension:
-            document += f" \\sout{{{original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
-            due_date = extension.due_date
-            document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
-            document += " (extension granted)\\\\\n"
+    def generate_pr_summary(self, pr: PullRequest, phase: int | None = None) -> str:
+        document = ""
+        if phase is not None:
+            extension = self.extensions.get((pr.owner, phase))
+            original_due_date = self.merge_due_dates[phase - 1]
+            document += "approval due"
+            if extension:
+                document += (
+                    f" \\sout{{{original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
+                )
+                due_date = extension.due_date
+                document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+                document += " (extension granted)\\\\\n"
+            else:
+                due_date = original_due_date
+                document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
         else:
-            due_date = original_due_date
-            document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+            due_date = None
         document += textwrap.dedent("""
                                     \\setlength\\LTleft{0pt}
                                     \\setlength\\LTright{0pt}
@@ -215,8 +227,9 @@ class EhrProjectStatus:
             f"\n{pr.created_at.strftime('%Y-%m-%d %H:%M:%S')} & CREATED & \\\\\n"
         )
         state = PrState.UNDER_DEVELOPMENT
-        pr_state_machine = PrStateMachine(pr.created_at, due_date)
+        pr_state_machine = PrStateMachine(pr.created_at)
         for event in all_events:
+            new_state = None
             if isinstance(event, (ReviewRequested, ReviewDismissed)):
                 if (
                     pr_state_machine.reviewer_states[event.reviewer]
@@ -244,18 +257,22 @@ class EhrProjectStatus:
                     ReviewerState.APPROVED
                 )
             elif isinstance(event, Merge):
-                pr_state_machine.state = PrState.MERGED
+                new_state = PrState.MERGED
+            elif isinstance(event, ClosedEvent):
+                if pr_state_machine.state == PrState.MERGED:
+                    continue
+                new_state = PrState.CLOSED
             state, elapsed, elapsed_in_state = pr_state_machine.update_state(
-                event.created_at
+                event.created_at, new_state
             )
             if elapsed_in_state is not None:
                 document += f"{event.get_summary()} & {state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
             else:
                 document += f"{event.get_summary()} & \\\\\n"
-        if state == PrState.UNDER_DEVELOPMENT:
+        if pr_state_machine.state == PrState.UNDER_DEVELOPMENT:
             duration = now() - pr_state_machine.last_state_change_time
             pr_state_machine.total_under_development_duration += duration
-        elif state == PrState.UNDER_REVIEW:
+        elif pr_state_machine.state == PrState.UNDER_REVIEW:
             duration = now() - pr_state_machine.last_state_change_time
             pr_state_machine.total_under_review_duration += duration
         out_of_slo = pr_state_machine.out_of_slo_under_review_duration
@@ -264,8 +281,6 @@ class EhrProjectStatus:
             if pr_state_machine.finish_time is not None
             else now()
         )
-        late_by = max(finish_time - pr_state_machine.due_time, timedelta(0))
-        adjusted_lateness = max(late_by - out_of_slo, timedelta(0))
 
         document += "\midrule\n"
         document += f"&& under development for {pad_to(td_to_str(pr_state_machine.total_under_development_duration), 17)} \\\\\n"
@@ -273,12 +288,13 @@ class EhrProjectStatus:
         document += (
             f"&& reviews out of SLO for {pad_to(td_to_str(out_of_slo), 17)} \\\\\n"
         )
-        document += f"&& late by {pad_to(td_to_str(late_by), 17)} \\\\\n"
-        document += "\midrule\n"
-        document += (
-            f"&& adjusted lateness: {pad_to(td_to_str(adjusted_lateness), 17)} \\\\\n"
-        )
-        document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(math.ceil(adjusted_lateness / timedelta(days=1)), 17)}}} \\\\\n"
+        if due_date is not None:
+            late_by = max(finish_time - due_date, timedelta(0))
+            adjusted_lateness = max(late_by - out_of_slo, timedelta(0))
+            document += f"&& late by {pad_to(td_to_str(late_by), 17)} \\\\\n"
+            document += "\midrule\n"
+            document += f"&& adjusted lateness: {pad_to(td_to_str(adjusted_lateness), 17)} \\\\\n"
+            document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(math.ceil(adjusted_lateness / timedelta(days=1)), 17)}}} \\\\\n"
         document += textwrap.dedent("""
                                     \\bottomrule
                                     \end{longtable}
@@ -306,7 +322,8 @@ class EhrProjectStatus:
     def generate_pr_summaries(self: Self, username: str) -> None:
         """Generate PR summaries."""
         prs = [pr for pr in self.list_prs(username) if pr.based_on_main]
-        if len(prs) > len(self.merge_due_dates):
+        not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
+        if len(not_closed_prs) > len(self.merge_due_dates):
             raise ValueError("Too many PRs!")
         document = textwrap.dedent(f"""
                     \\documentclass{{article}}
@@ -325,7 +342,7 @@ class EhrProjectStatus:
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.4.0}}{{ehr-utils-project-status 0.4.0}}}}
+                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.5.0}}{{ehr-utils-project-status 0.5.0}}}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
@@ -338,8 +355,16 @@ class EhrProjectStatus:
             + "\\textbf{inferred phase}:\\\\\n"
             + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
             + self.generate_pr_summary(pr, phase)
-            for idx, pr in enumerate(prs)
+            for idx, pr in enumerate(not_closed_prs)
             for phase in self.infer_phase(pr, idx)
+        ]
+        pages += [
+            "\\fancyfoot[R]{\\setfont phase ??}"
+            + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
+            + f'"{pr.title}" (branch "{pr.branch}")\\\\\n'
+            + f"\\url{{{pr.permalink}}}\\\\\n"
+            + self.generate_pr_summary(pr)
+            for pr in [pr for pr in prs if pr.state == "CLOSED"]
         ]
         document += "\n\\pagebreak\n".join(pages)
         document += "\n\\end{document}"
@@ -389,13 +414,21 @@ class EhrProjectStatus:
             for timeline_item in timeline_items
             if timeline_item["__typename"] == "MergedEvent"
         ]
+        closes = [
+            ClosedEvent(
+                created_at=et_datetime(timeline_item["createdAt"]),
+            )
+            for timeline_item in timeline_items
+            if timeline_item["__typename"] == "ClosedEvent"
+        ]
 
         return sorted(
             reviews_requested
             + reviews
             + review_requests_removed
             + reviews_dismissed
-            + merges,
+            + merges
+            + closes,
             key=lambda event: event.created_at,
         )
 
@@ -415,7 +448,7 @@ class EhrProjectStatus:
                                 }}
                             }}
                         }}
-                        pullRequests(first: 100, states:[OPEN, MERGED]) {{
+                        pullRequests(first: 100, states:[CLOSED, OPEN, MERGED]) {{
                             edges {{
                                 node {{
                                     createdAt
@@ -479,6 +512,9 @@ class EhrProjectStatus:
                                                     }}
                                                 }}
                                                 ... on MergedEvent {{
+                                                    createdAt
+                                                }}
+                                                ... on ClosedEvent {{
                                                     createdAt
                                                 }}
                                             }}
