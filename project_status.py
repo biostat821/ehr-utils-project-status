@@ -194,6 +194,7 @@ class EhrProjectStatus:
         datetime(2025, 3, 19, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
         datetime(2025, 3, 26, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
         datetime(2025, 4, 9, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
+        datetime(2025, 4, 23, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
     ]
 
     def generate_pr_summary(self, pr: PullRequest, phase: int | None = None) -> str:
@@ -342,7 +343,7 @@ class EhrProjectStatus:
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.5.0}}{{ehr-utils-project-status 0.5.0}}}}
+                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.5.1}}{{ehr-utils-project-status 0.5.1}}}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
@@ -381,6 +382,10 @@ class EhrProjectStatus:
             )
             for timeline_item in timeline_items
             if timeline_item["__typename"] == "ReviewRequestedEvent"
+            and "login"
+            in timeline_item[
+                "requestedReviewer"
+            ]  # there is no "login" if the reviewer is Copilot
         ]
         reviews_dismissed = [
             ReviewDismissed(
