@@ -69,7 +69,7 @@ class PrStateMachine:
 
     def update_state(
         self, event_time: datetime, state: PrState | None = None
-    ) -> tuple[PrState, timedelta, timedelta | None]:
+    ) -> tuple[PrState, PrState, timedelta, timedelta | None]:
         """Update the state in response to a new event."""
         elapsed = event_time - self.last_event_time
         elapsed_in_state = event_time - self.last_state_change_time
@@ -99,7 +99,7 @@ class PrStateMachine:
 
         duration = self.maybe_change_state(state, event_time)
         if duration is None:
-            return self.state, elapsed, None
+            return self.state, self.state, elapsed, None
 
         if self.previous_state == PrState.UNDER_REVIEW:
             self.total_under_review_duration += duration
@@ -108,4 +108,4 @@ class PrStateMachine:
             )
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += duration
-        return self.previous_state, elapsed, elapsed_in_state
+        return self.previous_state, self.state, elapsed, elapsed_in_state

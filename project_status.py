@@ -3,9 +3,9 @@
 
 import argparse
 import csv
+from itertools import accumulate
 import math
 import os
-import re
 import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
@@ -15,6 +15,11 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from pr_state_machine import PrState, PrStateMachine, ReviewerState
+
+
+def escape_latex(raw: str) -> str:
+    """Escape ampersands in strings bound for LaTeX."""
+    return raw.replace("&", "\\&")
 
 
 def et_datetime(iso: str) -> datetime:
@@ -188,33 +193,46 @@ class EhrProjectStatus:
     def repo_name(self: Self, username: str):
         return f"ehr-utils-{username}"
 
-    merge_due_dates = [
-        datetime(2025, 2, 12, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
-        datetime(2025, 2, 26, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
-        datetime(2025, 3, 19, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
-        datetime(2025, 3, 26, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
-        datetime(2025, 4, 9, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
-        datetime(2025, 4, 23, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")),
+    next_due_date = datetime(
+        2025, 2, 12, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
+    )
+    inter_phase_durations = [
+        timedelta(days=14),
+        timedelta(days=21),
+        timedelta(days=7),
+        timedelta(days=14),
+        timedelta(days=14),
     ]
+    merge_due_dates: list[datetime] = list(
+        accumulate(inter_phase_durations, lambda dt, td: dt + td, initial=next_due_date)
+    )
+    final_due_date = datetime(
+        2025, 4, 25, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
+    )
 
-    def generate_pr_summary(self, pr: PullRequest, phase: int | None = None) -> str:
+    def generate_pr_summary(
+        self,
+        pr: PullRequest,
+        phase: int | None = None,
+        due_date: datetime | None = None,
+    ) -> tuple[str, datetime | None]:
         document = ""
         if phase is not None:
             extension = self.extensions.get((pr.owner, phase))
             original_due_date = self.merge_due_dates[phase - 1]
+            scheduled_due_date = extension.due_date if extension else original_due_date
+            if due_date:
+                due_date = min(max(due_date, scheduled_due_date), self.final_due_date)
+            else:
+                due_date = scheduled_due_date
             document += "approval due"
-            if extension:
+            if due_date != original_due_date:
                 document += (
                     f" \\sout{{{original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
                 )
-                due_date = extension.due_date
-                document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+            document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+            if extension:
                 document += " (extension granted)\\\\\n"
-            else:
-                due_date = original_due_date
-                document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
-        else:
-            due_date = None
         document += textwrap.dedent("""
                                     \\setlength\\LTleft{0pt}
                                     \\setlength\\LTright{0pt}
@@ -229,6 +247,7 @@ class EhrProjectStatus:
         )
         state = PrState.UNDER_DEVELOPMENT
         pr_state_machine = PrStateMachine(pr.created_at)
+        approval = None
         for event in all_events:
             new_state = None
             if isinstance(event, (ReviewRequested, ReviewDismissed)):
@@ -263,11 +282,13 @@ class EhrProjectStatus:
                 if pr_state_machine.state == PrState.MERGED:
                     continue
                 new_state = PrState.CLOSED
-            state, elapsed, elapsed_in_state = pr_state_machine.update_state(
-                event.created_at, new_state
+            previous_state, state, elapsed, elapsed_in_state = (
+                pr_state_machine.update_state(event.created_at, new_state)
             )
+            if state == PrState.APPROVED and approval is None:
+                approval = event.created_at
             if elapsed_in_state is not None:
-                document += f"{event.get_summary()} & {state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
+                document += f"{event.get_summary()} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
             else:
                 document += f"{event.get_summary()} & \\\\\n"
         if pr_state_machine.state == PrState.UNDER_DEVELOPMENT:
@@ -300,10 +321,10 @@ class EhrProjectStatus:
                                     \\bottomrule
                                     \end{longtable}
                                     """).strip()
-        return document
+        return document, approval
 
-    def infer_phase(self, pr: PullRequest, idx: int) -> list[int]:
-        """Infer which phase this PR is for.
+    def infer_phases(self, pr: PullRequest, idx: int) -> list[int]:
+        """Infer which phase(s) this PR is for.
 
         idx indicates where it falls in creation order (zero-indexed).
         """
@@ -343,29 +364,42 @@ class EhrProjectStatus:
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.5.1}}{{ehr-utils-project-status 0.5.1}}}}
+                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.6.0}}{{ehr-utils-project-status 0.6.0}}}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
+        pr_phases = [
+            (pr, self.infer_phases(pr, idx)) for idx, pr in enumerate(not_closed_prs)
+        ]
+        phase_prs = {phase: pr for pr, phases in pr_phases for phase in phases}
+        not_closed_summaries = []
+        for phase, pr in sorted(phase_prs.items()):
+            summary, approval = self.generate_pr_summary(pr, phase, self.next_due_date)
+            if approval and phase < len(self.merge_due_dates):
+                self.next_due_date = approval + self.inter_phase_durations[phase - 1]
+            not_closed_summaries.append((phase, pr, summary))
         pages = [
             f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
             + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
-            + f'"{pr.title}" (branch "{pr.branch}")\\\\\n'
+            + f'"{escape_latex(pr.title)}" (branch "{pr.branch}")\\\\\n'
             + f"\\url{{{pr.permalink}}}\\\\\n"
             + "\\\\\n"
             + "\\textbf{inferred phase}:\\\\\n"
             + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
-            + self.generate_pr_summary(pr, phase)
-            for idx, pr in enumerate(not_closed_prs)
-            for phase in self.infer_phase(pr, idx)
+            + summary
+            for phase, pr, summary in not_closed_summaries
+        ]
+        closed_summaries = [
+            (pr, self.generate_pr_summary(pr)[0])
+            for pr in [pr for pr in prs if pr.state == "CLOSED"]
         ]
         pages += [
             "\\fancyfoot[R]{\\setfont phase ??}"
             + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
             + f'"{pr.title}" (branch "{pr.branch}")\\\\\n'
             + f"\\url{{{pr.permalink}}}\\\\\n"
-            + self.generate_pr_summary(pr)
-            for pr in [pr for pr in prs if pr.state == "CLOSED"]
+            + summary
+            for pr, summary in closed_summaries
         ]
         document += "\n\\pagebreak\n".join(pages)
         document += "\n\\end{document}"
