@@ -213,16 +213,19 @@ class EhrProjectStatus:
     first_due_date = datetime(
         2025, 2, 12, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
     )
-    inter_phase_durations = [
-        timedelta(days=14),
-        timedelta(days=21),
-        timedelta(days=7),
-        timedelta(days=14),
-        timedelta(days=14),
-    ]
+    phase_durations = {
+        1: timedelta(days=14),
+        2: timedelta(days=14),
+        3: timedelta(days=21),
+        4: timedelta(days=7),
+        5: timedelta(days=14),
+        6: timedelta(days=14),
+    }
     merge_due_dates: list[datetime] = list(
         accumulate(
-            inter_phase_durations, lambda dt, td: dt + td, initial=first_due_date
+            list(phase_durations.values())[1:],
+            lambda dt, td: dt + td,
+            initial=first_due_date,
         )
     )
     final_due_date = datetime(
@@ -240,7 +243,7 @@ class EhrProjectStatus:
         if phase is not None:
             extension = self.extensions.get((pr.owner, phase))
             rolling_due_date = (
-                last_approval + self.inter_phase_durations[phase - 1]
+                last_approval + self.phase_durations[phase]
                 if last_approval and phase < 6
                 else self.first_due_date
             )
@@ -402,7 +405,7 @@ class EhrProjectStatus:
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.7.0}}{{ehr-utils-project-status 0.7.0}}}}
+                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.7.1}}{{ehr-utils-project-status 0.7.1}}}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
@@ -429,9 +432,9 @@ class EhrProjectStatus:
                     pr, phase, last_approval, cumulative_adjusted_lateness
                 )
                 cumulative_adjusted_lateness += adjusted_lateness
-                if approval and phase < len(self.merge_due_dates):
-                    last_approval = approval
                 summaries.append((phase, pr, summary))
+            if approval and phase < len(self.merge_due_dates):
+                last_approval = approval
         pages = [
             f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
             + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
