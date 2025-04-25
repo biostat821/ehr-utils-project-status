@@ -6,6 +6,7 @@ import csv
 from itertools import accumulate
 import math
 import os
+import re
 import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
@@ -15,6 +16,20 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from pr_state_machine import PrState, PrStateMachine, ReviewerState
+
+
+def guess_phase(pr_title: str) -> int | None:
+    """Guess what phase a PR is associated with, based on the title."""
+    pr_title = pr_title.lower()
+    if "phase" in pr_title:
+        # remove everything before the last occurrence of "phase"
+        pr_title = pr_title.split("phase")[-1]
+    numbers_pattern = r"((\d+)\D*)+"
+    match = re.search(numbers_pattern, pr_title)
+    if match is None:
+        return None
+    # return the first integer found
+    return int(match.group(2))
 
 
 def escape_latex(raw: str) -> str:
@@ -47,13 +62,15 @@ def pad_to(x, n: int) -> str:
 
 def td_to_str(td: timedelta) -> str:
     """Convert timedelta to string."""
-    remainder = int(td.total_seconds())
+    sign = "-" if td < timedelta(0) else ""
+    abs_td = abs(td)
+    remainder = int(abs_td.total_seconds())
     days, remainder = divmod(remainder, 86400)
     string = ""
     if days == 1:
-        string += "1 day, "
+        string += f"{sign}{days} day, "
     elif days > 1:
-        string += f"{days} days, "
+        string += f"{sign}{days} days, "
     hours, remainder = divmod(remainder, 3600)
     minutes, seconds = divmod(remainder, 60)
     string += f"{hours:02}:{minutes:02}:{seconds:02}"
@@ -193,7 +210,7 @@ class EhrProjectStatus:
     def repo_name(self: Self, username: str):
         return f"ehr-utils-{username}"
 
-    next_due_date = datetime(
+    first_due_date = datetime(
         2025, 2, 12, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
     )
     inter_phase_durations = [
@@ -204,7 +221,9 @@ class EhrProjectStatus:
         timedelta(days=14),
     ]
     merge_due_dates: list[datetime] = list(
-        accumulate(inter_phase_durations, lambda dt, td: dt + td, initial=next_due_date)
+        accumulate(
+            inter_phase_durations, lambda dt, td: dt + td, initial=first_due_date
+        )
     )
     final_due_date = datetime(
         2025, 4, 25, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
@@ -214,15 +233,23 @@ class EhrProjectStatus:
         self,
         pr: PullRequest,
         phase: int | None = None,
-        due_date: datetime | None = None,
-    ) -> tuple[str, datetime | None]:
+        last_approval: datetime | None = None,
+        prior_adjusted_lateness: timedelta = timedelta(0),
+    ) -> tuple[str, datetime | None, timedelta]:
         document = ""
         if phase is not None:
             extension = self.extensions.get((pr.owner, phase))
+            rolling_due_date = (
+                last_approval + self.inter_phase_durations[phase - 1]
+                if last_approval and phase < 6
+                else self.first_due_date
+            )
             original_due_date = self.merge_due_dates[phase - 1]
             scheduled_due_date = extension.due_date if extension else original_due_date
-            if due_date:
-                due_date = min(max(due_date, scheduled_due_date), self.final_due_date)
+            if rolling_due_date:
+                due_date = min(
+                    max(rolling_due_date, scheduled_due_date), self.final_due_date
+                )
             else:
                 due_date = scheduled_due_date
             document += "approval due"
@@ -310,18 +337,28 @@ class EhrProjectStatus:
         document += (
             f"&& reviews out of SLO for {pad_to(td_to_str(out_of_slo), 17)} \\\\\n"
         )
-        if due_date is not None:
+        if due_date and approval:
             late_by = max(finish_time - due_date, timedelta(0))
             adjusted_lateness = max(late_by - out_of_slo, timedelta(0))
             document += f"&& late by {pad_to(td_to_str(late_by), 17)} \\\\\n"
-            document += "\midrule\n"
-            document += f"&& adjusted lateness: {pad_to(td_to_str(adjusted_lateness), 17)} \\\\\n"
-            document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(math.ceil(adjusted_lateness / timedelta(days=1)), 17)}}} \\\\\n"
+        else:
+            adjusted_lateness = -out_of_slo
+        document += (
+            f"&& adjusted lateness: {pad_to(td_to_str(adjusted_lateness), 17)} \\\\\n"
+        )
+        document += "\midrule\n"
+        cumulative_adjusted_lateness = adjusted_lateness + prior_adjusted_lateness
+        document += f"&& cumulative adjusted lateness: {pad_to(td_to_str(cumulative_adjusted_lateness), 17)} \\\\\n"
+        if approval:
+            points_deducted = max(
+                math.ceil(cumulative_adjusted_lateness / timedelta(days=1)), 0
+            )
+            document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(points_deducted, 17)}}} \\\\\n"
         document += textwrap.dedent("""
                                     \\bottomrule
                                     \end{longtable}
                                     """).strip()
-        return document, approval
+        return document, approval, adjusted_lateness
 
     def infer_phases(self, pr: PullRequest, idx: int) -> list[int]:
         """Infer which phase(s) this PR is for.
@@ -345,6 +382,7 @@ class EhrProjectStatus:
         """Generate PR summaries."""
         prs = [pr for pr in self.list_prs(username) if pr.based_on_main]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
+        closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > len(self.merge_due_dates):
             raise ValueError("Too many PRs!")
         document = textwrap.dedent(f"""
@@ -364,42 +402,50 @@ class EhrProjectStatus:
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
                     \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.6.0}}{{ehr-utils-project-status 0.6.0}}}}
+                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.7.0}}{{ehr-utils-project-status 0.7.0}}}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
-        pr_phases = [
+        not_closed_pr_phases = [
             (pr, self.infer_phases(pr, idx)) for idx, pr in enumerate(not_closed_prs)
         ]
-        phase_prs = {phase: pr for pr, phases in pr_phases for phase in phases}
-        not_closed_summaries = []
-        for phase, pr in sorted(phase_prs.items()):
-            summary, approval = self.generate_pr_summary(pr, phase, self.next_due_date)
-            if approval and phase < len(self.merge_due_dates):
-                self.next_due_date = approval + self.inter_phase_durations[phase - 1]
-            not_closed_summaries.append((phase, pr, summary))
+        closed_pr_phases = [
+            (pr, guess_phase(pr.title)) for idx, pr in enumerate(closed_prs)
+        ]
+        phase_prs = defaultdict(list)
+        for pr, phase in closed_pr_phases:
+            if phase:
+                phase_prs[phase].append(pr)
+        for pr, phases in not_closed_pr_phases:
+            for phase in phases:
+                phase_prs[phase].append(pr)
+        summaries = []
+
+        last_approval = None
+        for phase, prs in sorted(phase_prs.items()):
+            cumulative_adjusted_lateness = timedelta(0)
+            for pr in prs:
+                summary, approval, adjusted_lateness = self.generate_pr_summary(
+                    pr, phase, last_approval, cumulative_adjusted_lateness
+                )
+                cumulative_adjusted_lateness += adjusted_lateness
+                if approval and phase < len(self.merge_due_dates):
+                    last_approval = approval
+                summaries.append((phase, pr, summary))
         pages = [
             f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
             + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
             + f'"{escape_latex(pr.title)}" (branch "{pr.branch}")\\\\\n'
             + f"\\url{{{pr.permalink}}}\\\\\n"
-            + "\\\\\n"
-            + "\\textbf{inferred phase}:\\\\\n"
-            + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
+            + (
+                "\\\\\n"
+                + "\\textbf{inferred phase}:\\\\\n"
+                + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
+                if phase in {1, 2, 3, 4, 5, 6}
+                else ""
+            )
             + summary
-            for phase, pr, summary in not_closed_summaries
-        ]
-        closed_summaries = [
-            (pr, self.generate_pr_summary(pr)[0])
-            for pr in [pr for pr in prs if pr.state == "CLOSED"]
-        ]
-        pages += [
-            "\\fancyfoot[R]{\\setfont phase ??}"
-            + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
-            + f'"{pr.title}" (branch "{pr.branch}")\\\\\n'
-            + f"\\url{{{pr.permalink}}}\\\\\n"
-            + summary
-            for pr, summary in closed_summaries
+            for phase, pr, summary in summaries
         ]
         document += "\n\\pagebreak\n".join(pages)
         document += "\n\\end{document}"
