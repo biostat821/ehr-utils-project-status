@@ -18,6 +18,7 @@ class ReviewerState(Enum):
 class PrState(Enum):
     """State of a PR."""
 
+    WAITING = "awaiting previous phase"
     UNDER_DEVELOPMENT = "under development"
     UNDER_REVIEW = "under review"
     APPROVED = "approved"
@@ -28,18 +29,23 @@ class PrState(Enum):
 class PrStateMachine:
     """Models PR state transitions."""
 
-    def __init__(self, start_time: datetime):
+    def __init__(self, create_time: datetime, last_approval: datetime | None):
         """Initialize."""
-        self.last_event_time = start_time
-        self._last_state_change_time = start_time
+        self.last_event_time = (
+            min(create_time, last_approval) if last_approval else create_time
+        )
+        self._last_state_change_time = self.last_event_time
         self.reviewer_states: dict[str, ReviewerState] = defaultdict(
             lambda: ReviewerState.NONE
         )
         self.total_under_review_duration: timedelta = timedelta(0)
         self.out_of_slo_under_review_duration: timedelta = timedelta(0)
         self.total_under_development_duration: timedelta = timedelta(0)
-        self._state = PrState.UNDER_DEVELOPMENT
-        self._previous_state = PrState.UNDER_DEVELOPMENT
+        self._state = PrState.WAITING if last_approval else PrState.UNDER_DEVELOPMENT
+        self._previous_state = (
+            PrState.WAITING if last_approval else PrState.UNDER_DEVELOPMENT
+        )
+        self.last_review_requested: datetime | None = None
         self.finish_time: datetime | None = None
 
     @property
@@ -83,7 +89,7 @@ class PrStateMachine:
         ):
             state = PrState.APPROVED
             if self.finish_time is None:
-                self.finish_time = event_time
+                self.finish_time = self.last_review_requested
         elif any(
             reviewer_state == ReviewerState.REQUESTED_CHANGES
             for reviewer_state in self.reviewer_states.values()
@@ -103,9 +109,16 @@ class PrStateMachine:
 
         if self.previous_state == PrState.UNDER_REVIEW:
             self.total_under_review_duration += duration
-            self.out_of_slo_under_review_duration += max(
-                timedelta(0), duration - timedelta(days=3)
-            )
+            if self.finish_time:
+                # exclude duration since "finish" from out-of-SLO duration
+                self.out_of_slo_under_review_duration += max(
+                    timedelta(0),
+                    duration - (event_time - self.finish_time) - timedelta(days=3),
+                )
+            else:
+                self.out_of_slo_under_review_duration += max(
+                    timedelta(0), duration - timedelta(days=3)
+                )
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += duration
         return self.previous_state, self.state, elapsed, elapsed_in_state

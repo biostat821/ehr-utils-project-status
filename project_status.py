@@ -104,6 +104,18 @@ class PullRequest:
 
 
 @dataclass
+class Created(Event):
+    def get_summary(self: Self, verbose: bool = False) -> str:
+        return f"{self.creation_time} & CREATED"
+
+
+@dataclass
+class PreviousPhaseApproved(Event):
+    def get_summary(self: Self, verbose: bool = False) -> str:
+        return f"{self.creation_time} & PREVIOUS_PHASE_APPROVED"
+
+
+@dataclass
 class ReviewRequested(Event):
     reviewer: str
 
@@ -190,9 +202,11 @@ def get_phase_mapping_overrides(filename: str) -> dict[str, dict[int, list[int]]
 class EhrProjectStatus:
     """Multitool for managing EHR projects on GitHub."""
 
-    def __init__(self: Self, organization: str):
+    def __init__(self: Self, organization: str, username: str, name: str):
         """Initialize."""
         self.organization = organization
+        self.username = username
+        self.name = name
         self.auth_token = os.getenv("GITHUB_TOKEN")
         self.headers = {
             "Accept": "application/vnd.github+json",
@@ -244,7 +258,7 @@ class EhrProjectStatus:
             extension = self.extensions.get((pr.owner, phase))
             rolling_due_date = (
                 last_approval + self.phase_durations[phase]
-                if last_approval and phase < 6
+                if last_approval and phase <= 6
                 else self.first_due_date
             )
             original_due_date = self.merge_due_dates[phase - 1]
@@ -271,12 +285,13 @@ class EhrProjectStatus:
                                     \\textbf{timestamp} & \\textbf{event} & \\textbf{status} \\\\
                                     \\midrule
                                     """).strip()
-        all_events = pr.timeline_events
-        document += (
-            f"\n{pr.created_at.strftime('%Y-%m-%d %H:%M:%S')} & CREATED & \\\\\n"
+        all_events = sorted(
+            [Created(pr.created_at)]
+            + pr.timeline_events
+            + ([PreviousPhaseApproved(last_approval)] if last_approval else []),
+            key=lambda event: event.created_at,
         )
-        state = PrState.UNDER_DEVELOPMENT
-        pr_state_machine = PrStateMachine(pr.created_at)
+        pr_state_machine = PrStateMachine(pr.created_at, last_approval)
         approval = None
         for event in all_events:
             new_state = None
@@ -292,6 +307,7 @@ class EhrProjectStatus:
                     pr_state_machine.reviewer_states[event.reviewer] = (
                         ReviewerState.REVIEW_REQUESTED_POST_APPROVAL
                     )
+                pr_state_machine.last_review_requested = event.created_at
             elif isinstance(event, ReviewRequestRemoved):
                 del pr_state_machine.reviewer_states[event.reviewer]
             elif isinstance(event, Review) and event.state == "CHANGES_REQUESTED":
@@ -302,7 +318,11 @@ class EhrProjectStatus:
                 pr_state_machine.reviewer_states[event.reviewer] = (
                     ReviewerState.REVIEW_REQUESTED
                 )
-            elif isinstance(event, Review):  # both APPROVED and COMMENTED
+            elif isinstance(event, Review) and (
+                event.state == "APPROVED"
+                or (event.state == "COMMENTED" and event.reviewer != "patrickkwang")
+            ):
+                # Both APPROVED and COMMENTED are considered approval.
                 pr_state_machine.reviewer_states[event.reviewer] = (
                     ReviewerState.APPROVED
                 )
@@ -312,12 +332,22 @@ class EhrProjectStatus:
                 if pr_state_machine.state == PrState.MERGED:
                     continue
                 new_state = PrState.CLOSED
+            # override new_state if currently waiting
+            if (
+                not pr_state_machine.reviewer_states["patrickkwang"]
+                == ReviewerState.APPROVED
+                and pr_state_machine.state == PrState.WAITING
+            ):
+                if isinstance(event, PreviousPhaseApproved):
+                    new_state = PrState.UNDER_DEVELOPMENT
+                else:
+                    new_state = PrState.WAITING
             previous_state, state, elapsed, elapsed_in_state = (
                 pr_state_machine.update_state(event.created_at, new_state)
             )
             if state == PrState.APPROVED and approval is None:
                 approval = event.created_at
-            if elapsed_in_state is not None:
+            if elapsed_in_state:
                 document += f"{event.get_summary()} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
             else:
                 document += f"{event.get_summary()} & \\\\\n"
@@ -328,11 +358,6 @@ class EhrProjectStatus:
             duration = now() - pr_state_machine.last_state_change_time
             pr_state_machine.total_under_review_duration += duration
         out_of_slo = pr_state_machine.out_of_slo_under_review_duration
-        finish_time = (
-            pr_state_machine.finish_time
-            if pr_state_machine.finish_time is not None
-            else now()
-        )
 
         document += "\midrule\n"
         document += f"&& under development for {pad_to(td_to_str(pr_state_machine.total_under_development_duration), 17)} \\\\\n"
@@ -340,8 +365,8 @@ class EhrProjectStatus:
         document += (
             f"&& reviews out of SLO for {pad_to(td_to_str(out_of_slo), 17)} \\\\\n"
         )
-        if due_date and approval:
-            late_by = max(finish_time - due_date, timedelta(0))
+        if due_date and pr_state_machine.finish_time:
+            late_by = max(pr_state_machine.finish_time - due_date, timedelta(0))
             adjusted_lateness = max(late_by - out_of_slo, timedelta(0))
             document += f"&& late by {pad_to(td_to_str(late_by), 17)} \\\\\n"
         else:
@@ -352,11 +377,15 @@ class EhrProjectStatus:
         document += "\midrule\n"
         cumulative_adjusted_lateness = adjusted_lateness + prior_adjusted_lateness
         document += f"&& cumulative adjusted lateness: {pad_to(td_to_str(cumulative_adjusted_lateness), 17)} \\\\\n"
-        if approval:
+        if pr_state_machine.finish_time:
             points_deducted = max(
                 math.ceil(cumulative_adjusted_lateness / timedelta(days=1)), 0
             )
             document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(points_deducted, 17)}}} \\\\\n"
+            with open("outputs/_summary.csv", "a") as f:
+                f.write(
+                    f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
+                )
         document += textwrap.dedent("""
                                     \\bottomrule
                                     \end{longtable}
@@ -381,9 +410,9 @@ class EhrProjectStatus:
             return []
         return [idx + 1]
 
-    def generate_pr_summaries(self: Self, username: str) -> None:
+    def generate_pr_summaries(self: Self) -> None:
         """Generate PR summaries."""
-        prs = [pr for pr in self.list_prs(username) if pr.based_on_main]
+        prs = [pr for pr in self.list_prs(self.username) if pr.based_on_main]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > len(self.merge_due_dates):
@@ -404,17 +433,25 @@ class EhrProjectStatus:
                     \\pagestyle{{fancy}}
                     \\fancyhead{{}} \\fancyfoot{{}}
                     \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
-                    \\fancyhead[C]{{\\setfont {username}}}
-                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v0.7.1}}{{ehr-utils-project-status 0.7.1}}}}
+                    \\fancyhead[C]{{\\setfont {self.username}}}
+                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v1.0.0}}{{ehr-utils-project-status 1.0.0}}}}
                     \\ttfamily
                     \\fontseries{{l}}\\selectfont
                     \\small""").strip()
-        not_closed_pr_phases = [
-            (pr, self.infer_phases(pr, idx)) for idx, pr in enumerate(not_closed_prs)
-        ]
         closed_pr_phases = [
             (pr, guess_phase(pr.title)) for idx, pr in enumerate(closed_prs)
         ]
+        not_closed_pr_phases = []
+        max_phase = 0
+        for pr in not_closed_prs:
+            if max_phase > 5:
+                # Too many not-closed PRs! Treat the remainder as closed.
+                closed_pr_phases.append((pr, guess_phase(pr.title)))
+                continue
+            phases = self.infer_phases(pr, max_phase)
+            if phases:
+                max_phase = max(phases + [max_phase])
+            not_closed_pr_phases.append((pr, phases))
         phase_prs = defaultdict(list)
         for pr, phase in closed_pr_phases:
             if phase:
@@ -433,8 +470,10 @@ class EhrProjectStatus:
                 )
                 cumulative_adjusted_lateness += adjusted_lateness
                 summaries.append((phase, pr, summary))
-            if approval and phase < len(self.merge_due_dates):
+            if approval and phase < 6:
                 last_approval = approval
+            else:
+                last_approval = None
         pages = [
             f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
             + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
@@ -453,7 +492,7 @@ class EhrProjectStatus:
         document += "\n\\pagebreak\n".join(pages)
         document += "\n\\end{document}"
         document = document.replace("_", "\\_")
-        with open(f"outputs/{username}.tex", "w") as f:
+        with open(f"outputs/{self.username}.tex", "w") as f:
             f.write(document)
 
     def parse_pr(self, pr):
@@ -490,10 +529,15 @@ class EhrProjectStatus:
             Review(
                 created_at=et_datetime(timeline_item["createdAt"]),
                 reviewer=timeline_item["author"]["login"],
-                state=timeline_item["state"],
+                state="APPROVED"
+                # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
+                if timeline_item["state"] == "DISMISSED"
+                else timeline_item["state"],
             )
             for timeline_item in timeline_items
             if timeline_item["__typename"] == "PullRequestReview"
+            and timeline_item["author"]["login"]
+            in ("patrickkwang", "hu-i-oop", "JasonMa-778")
         ]
         merges = [
             Merge(
@@ -670,5 +714,8 @@ if __name__ == "__main__":
         description="Generates project status reports",
     )
     parser.add_argument("username")
+    parser.add_argument("name")
     args = parser.parse_args()
-    EhrProjectStatus("biostat821-2025").generate_pr_summaries(args.username.strip())
+    EhrProjectStatus(
+        "biostat821-2025", args.username.strip(), args.name.strip()
+    ).generate_pr_summaries()
