@@ -293,6 +293,7 @@ class EhrProjectStatus:
         )
         pr_state_machine = PrStateMachine(pr.created_at, last_approval)
         approval = None
+        entries = []
         for event in all_events:
             new_state = None
             if isinstance(event, (ReviewRequested, ReviewDismissed)):
@@ -347,10 +348,7 @@ class EhrProjectStatus:
             )
             if state == PrState.APPROVED and approval is None:
                 approval = event.created_at
-            if elapsed_in_state:
-                document += f"{event.get_summary()} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
-            else:
-                document += f"{event.get_summary()} & \\\\\n"
+            entries.append((event.get_summary(), previous_state, elapsed_in_state))
         if pr_state_machine.state == PrState.UNDER_DEVELOPMENT:
             duration = now() - pr_state_machine.last_state_change_time
             pr_state_machine.total_under_development_duration += duration
@@ -358,7 +356,23 @@ class EhrProjectStatus:
             duration = now() - pr_state_machine.last_state_change_time
             pr_state_machine.total_under_review_duration += duration
         out_of_slo = pr_state_machine.out_of_slo_under_review_duration
+        if due_date and pr_state_machine.finish_time:
+            late_by = max(pr_state_machine.finish_time - due_date, timedelta(0))
+            adjusted_lateness = max(late_by - out_of_slo, timedelta(0))
+        else:
+            adjusted_lateness = -out_of_slo
+        cumulative_adjusted_lateness = adjusted_lateness + prior_adjusted_lateness
+        if pr_state_machine.finish_time:
+            points_deducted = max(
+                math.ceil(cumulative_adjusted_lateness / timedelta(days=1)), 0
+            )
 
+        # construct document
+        for event_summary, previous_state, elapsed_in_state in entries:
+            if elapsed_in_state:
+                document += f"{event_summary} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
+            else:
+                document += f"{event_summary} & \\\\\n"
         document += "\midrule\n"
         document += f"&& under development for {pad_to(td_to_str(pr_state_machine.total_under_development_duration), 17)} \\\\\n"
         document += f"&& under review for {pad_to(td_to_str(pr_state_machine.total_under_review_duration), 17)} \\\\\n"
@@ -366,21 +380,13 @@ class EhrProjectStatus:
             f"&& reviews out of SLO for {pad_to(td_to_str(out_of_slo), 17)} \\\\\n"
         )
         if due_date and pr_state_machine.finish_time:
-            late_by = max(pr_state_machine.finish_time - due_date, timedelta(0))
-            adjusted_lateness = max(late_by - out_of_slo, timedelta(0))
             document += f"&& late by {pad_to(td_to_str(late_by), 17)} \\\\\n"
-        else:
-            adjusted_lateness = -out_of_slo
         document += (
             f"&& adjusted lateness: {pad_to(td_to_str(adjusted_lateness), 17)} \\\\\n"
         )
         document += "\midrule\n"
-        cumulative_adjusted_lateness = adjusted_lateness + prior_adjusted_lateness
         document += f"&& cumulative adjusted lateness: {pad_to(td_to_str(cumulative_adjusted_lateness), 17)} \\\\\n"
         if pr_state_machine.finish_time:
-            points_deducted = max(
-                math.ceil(cumulative_adjusted_lateness / timedelta(days=1)), 0
-            )
             document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(points_deducted, 17)}}} \\\\\n"
             with open("outputs/_summary.csv", "a") as f:
                 f.write(
@@ -417,27 +423,6 @@ class EhrProjectStatus:
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > len(self.merge_due_dates):
             raise ValueError("Too many PRs!")
-        document = textwrap.dedent(f"""
-                    \\documentclass{{article}}
-                    \\usepackage[includehead, includefoot, portrait, margin=0.5in]{{geometry}}
-                    \\usepackage{{booktabs}}
-                    \\usepackage[colorlinks=true, urlcolor=blue]{{hyperref}}
-                    \\usepackage{{longtable}}
-                    \\usepackage{{fancyhdr}}               
-                    \\usepackage{{lmodern}}
-                    \\usepackage[normalem]{{ulem}}
-                    \\newcommand{{\\setfont}}{{
-                        \\ttfamily\\fontseries{{l}}\\selectfont\\small
-                    }}
-                    \\begin{{document}}
-                    \\pagestyle{{fancy}}
-                    \\fancyhead{{}} \\fancyfoot{{}}
-                    \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
-                    \\fancyhead[C]{{\\setfont {self.username}}}
-                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v1.0.0}}{{ehr-utils-project-status 1.0.0}}}}
-                    \\ttfamily
-                    \\fontseries{{l}}\\selectfont
-                    \\small""").strip()
         closed_pr_phases = [
             (pr, guess_phase(pr.title)) for idx, pr in enumerate(closed_prs)
         ]
@@ -474,21 +459,46 @@ class EhrProjectStatus:
                 last_approval = approval
             else:
                 last_approval = None
-        pages = [
-            f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
-            + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
-            + f'"{escape_latex(pr.title)}" (branch "{pr.branch}")\\\\\n'
-            + f"\\url{{{pr.permalink}}}\\\\\n"
-            + (
-                "\\\\\n"
-                + "\\textbf{inferred phase}:\\\\\n"
-                + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
-                if phase in {1, 2, 3, 4, 5, 6}
-                else ""
+
+        def create_page(phase: int, pr: PullRequest, summary: str) -> str:
+            return (
+                f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
+                + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
+                + f'"{escape_latex(pr.title)}" (branch "{pr.branch}")\\\\\n'
+                + f"\\url{{{pr.permalink}}}\\\\\n"
+                + (
+                    "\\\\\n"
+                    + "\\textbf{inferred phase}:\\\\\n"
+                    + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
+                    if phase in {1, 2, 3, 4, 5, 6}
+                    else ""
+                )
+                + summary
             )
-            + summary
-            for phase, pr, summary in summaries
-        ]
+
+        pages = [create_page(phase, pr, summary) for phase, pr, summary in summaries]
+
+        document = textwrap.dedent(f"""
+                    \\documentclass{{article}}
+                    \\usepackage[includehead, includefoot, portrait, margin=0.5in]{{geometry}}
+                    \\usepackage{{booktabs}}
+                    \\usepackage[colorlinks=true, urlcolor=blue]{{hyperref}}
+                    \\usepackage{{longtable}}
+                    \\usepackage{{fancyhdr}}               
+                    \\usepackage{{lmodern}}
+                    \\usepackage[normalem]{{ulem}}
+                    \\newcommand{{\\setfont}}{{
+                        \\ttfamily\\fontseries{{l}}\\selectfont\\small
+                    }}
+                    \\begin{{document}}
+                    \\pagestyle{{fancy}}
+                    \\fancyhead{{}} \\fancyfoot{{}}
+                    \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
+                    \\fancyhead[C]{{\\setfont {self.username}}}
+                    \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v1.0.0}}{{ehr-utils-project-status 1.0.0}}}}
+                    \\ttfamily
+                    \\fontseries{{l}}\\selectfont
+                    \\small""").strip()
         document += "\n\\pagebreak\n".join(pages)
         document += "\n\\end{document}"
         document = document.replace("_", "\\_")
