@@ -18,6 +18,7 @@ import httpx
 from pr_state_machine import PrState, PrStateMachine, ReviewerState
 
 NUM_PHASES = 6
+PHASES = set(range(1, NUM_PHASES + 1))
 
 
 def guess_phase(pr_title: str) -> int | None:
@@ -31,7 +32,8 @@ def guess_phase(pr_title: str) -> int | None:
     if match is None:
         return None
     # return the first integer found
-    return int(match.group(2))
+    guess = int(match.group(2))
+    return guess if guess in PHASES else None
 
 
 def escape_latex(raw: str) -> str:
@@ -212,7 +214,7 @@ def write_document(username: str, summaries):
                 "\\\\\n"
                 + "\\textbf{inferred phase}:\\\\\n"
                 + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
-                if phase in set(range(1, NUM_PHASES + 1))
+                if phase in PHASES
                 else ""
             )
         )
@@ -358,12 +360,13 @@ class EhrProjectStatus:
         last_approval: datetime | None = None,
         prior_adjusted_lateness: timedelta = timedelta(0),
     ) -> tuple[str, datetime | None, timedelta]:
+        assert phase in PHASES
         due_date = None
         if phase is not None:
             extension = self.extensions.get((pr.owner, phase))
             rolling_due_date = (
                 last_approval + self.phase_durations[phase]
-                if last_approval and phase <= NUM_PHASES
+                if last_approval
                 else self.first_due_date
             )
             original_due_date = self.merge_due_dates[phase - 1]
@@ -478,23 +481,23 @@ class EhrProjectStatus:
                 )
         return document, approval, adjusted_lateness
 
-    def infer_phases(self, pr: PullRequest, idx: int) -> list[int]:
+    def infer_phases(self, pr: PullRequest, next_phase: int) -> list[int]:
         """Infer which phase(s) this PR is for.
 
-        idx indicates where it falls in creation order (zero-indexed).
+        next_phases indicates the next unclaimed phase.
         """
         if (
             pr.owner in self.phase_mapping_overrides
             and pr.number in self.phase_mapping_overrides[pr.owner]
         ):
             return self.phase_mapping_overrides[pr.owner][pr.number]
-        if pr.owner in self.phase_mapping_overrides and idx + 1 in [
+        if pr.owner in self.phase_mapping_overrides and next_phase in [
             phase
             for phases in self.phase_mapping_overrides[pr.owner].values()
             for phase in phases
         ]:
             return []
-        return [idx + 1]
+        return [next_phase]
 
     def generate_pr_summaries(self: Self) -> None:
         """Generate PR summaries."""
@@ -509,11 +512,11 @@ class EhrProjectStatus:
         not_closed_pr_phases = []
         max_phase = 0
         for pr in not_closed_prs:
-            if max_phase > 5:
+            if max_phase + 1 not in PHASES:
                 # Too many not-closed PRs! Treat the remainder as closed.
                 closed_pr_phases.append((pr, guess_phase(pr.title)))
                 continue
-            phases = self.infer_phases(pr, max_phase)
+            phases = self.infer_phases(pr, max_phase + 1)
             if phases:
                 max_phase = max(phases + [max_phase])
             not_closed_pr_phases.append((pr, phases))
