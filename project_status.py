@@ -251,7 +251,6 @@ def write_document(username: str, summaries):
 def construct_document(
     due_date: datetime | None,
     original_due_date: datetime,
-    finish_time: datetime | None,
     extension: Extension | None,
     entries,
     total_under_development_duration: timedelta,
@@ -462,7 +461,6 @@ class EhrProjectStatus:
         document = construct_document(
             due_date,
             original_due_date,
-            pr_state_machine.finish_time,
             extension,
             entries,
             pr_state_machine.total_under_development_duration,
