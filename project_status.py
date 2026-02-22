@@ -15,18 +15,12 @@ from typing import Self
 from zoneinfo import ZoneInfo
 
 from github_client import (
-    ClosedEvent,
     Created,
     GithubClient,
-    Merge,
     PreviousPhaseApproved,
     PullRequest,
-    Review,
-    ReviewDismissed,
-    ReviewRequested,
-    ReviewRequestRemoved,
 )
-from pr_state_machine import PrState, PrStateMachine, ReviewerState
+from pr_state_machine import Entry, PrStateMachine
 
 NUM_PHASES = 6
 PHASES = set(range(1, NUM_PHASES + 1))
@@ -179,9 +173,6 @@ def write_document(username: str, summaries):
         f.write(document)
 
 
-Entry = tuple[str, PrState, timedelta | None]
-
-
 @dataclass
 class DocumentSpec:
     due_date: datetime | None
@@ -318,64 +309,7 @@ class EhrProjectStatus:
             key=lambda event: event.created_at,
         )
         pr_state_machine = PrStateMachine(pr.created_at, last_approval)
-        approval = None
-        entries = []
-        for event in all_events:
-            new_state = None
-            if isinstance(event, (ReviewRequested, ReviewDismissed)):
-                if (
-                    pr_state_machine.reviewer_states[event.reviewer]
-                    != ReviewerState.APPROVED
-                ):
-                    pr_state_machine.reviewer_states[event.reviewer] = (
-                        ReviewerState.REVIEW_REQUESTED
-                    )
-                else:
-                    pr_state_machine.reviewer_states[event.reviewer] = (
-                        ReviewerState.REVIEW_REQUESTED_POST_APPROVAL
-                    )
-                pr_state_machine.last_review_requested = event.created_at
-            elif isinstance(event, ReviewRequestRemoved):
-                del pr_state_machine.reviewer_states[event.reviewer]
-            elif isinstance(event, Review) and event.state == "CHANGES_REQUESTED":
-                pr_state_machine.reviewer_states[event.reviewer] = (
-                    ReviewerState.REQUESTED_CHANGES
-                )
-            elif isinstance(event, Review) and event.state == "DISMISSED":
-                pr_state_machine.reviewer_states[event.reviewer] = (
-                    ReviewerState.REVIEW_REQUESTED
-                )
-            elif isinstance(event, Review) and (
-                event.state == "APPROVED"
-                or (event.state == "COMMENTED" and event.reviewer != "patrickkwang")
-            ):
-                # Both APPROVED and COMMENTED are considered approval.
-                pr_state_machine.reviewer_states[event.reviewer] = (
-                    ReviewerState.APPROVED
-                )
-            elif isinstance(event, Merge):
-                new_state = PrState.MERGED
-            elif isinstance(event, ClosedEvent):
-                if pr_state_machine.state == PrState.MERGED:
-                    continue
-                new_state = PrState.CLOSED
-            # override new_state if currently waiting
-            if (
-                not pr_state_machine.reviewer_states["patrickkwang"]
-                == ReviewerState.APPROVED
-                and pr_state_machine.state == PrState.WAITING
-            ):
-                if isinstance(event, PreviousPhaseApproved):
-                    new_state = PrState.UNDER_DEVELOPMENT
-                else:
-                    new_state = PrState.WAITING
-            previous_state, state, elapsed, elapsed_in_state = (
-                pr_state_machine.update_state(event.created_at, new_state)
-            )
-            if state == PrState.APPROVED and approval is None:
-                approval = event.created_at
-            entries.append((event.get_summary(), previous_state, elapsed_in_state))
-        pr_state_machine.wrap_up()
+        entries, approval = pr_state_machine.process_events(all_events)
         out_of_slo = pr_state_machine.out_of_slo_under_review_duration
         if due_date and pr_state_machine.finish_time:
             late_by = max(pr_state_machine.finish_time - due_date, timedelta(0))

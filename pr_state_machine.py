@@ -3,7 +3,19 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import Self
 from zoneinfo import ZoneInfo
+
+from github_client import (
+    ClosedEvent,
+    Event,
+    Merge,
+    PreviousPhaseApproved,
+    Review,
+    ReviewDismissed,
+    ReviewRequested,
+    ReviewRequestRemoved,
+)
 
 
 def now() -> datetime:
@@ -30,6 +42,9 @@ class PrState(Enum):
     APPROVED = "approved"
     MERGED = "merged"
     CLOSED = "closed"
+
+
+Entry = tuple[str, PrState, timedelta | None]
 
 
 class PrStateMachine:
@@ -136,3 +151,57 @@ class PrStateMachine:
         elif self.state == PrState.UNDER_REVIEW:
             duration = now() - self.last_state_change_time
             self.total_under_review_duration += duration
+
+    def process_events(
+        self: Self, events: list[Event]
+    ) -> tuple[list[Entry], datetime | None]:
+        """Process events."""
+        approval = None
+        entries = []
+        for event in events:
+            new_state = None
+            if isinstance(event, (ReviewRequested, ReviewDismissed)):
+                if self.reviewer_states[event.reviewer] != ReviewerState.APPROVED:
+                    self.reviewer_states[event.reviewer] = (
+                        ReviewerState.REVIEW_REQUESTED
+                    )
+                else:
+                    self.reviewer_states[event.reviewer] = (
+                        ReviewerState.REVIEW_REQUESTED_POST_APPROVAL
+                    )
+                self.last_review_requested = event.created_at
+            elif isinstance(event, ReviewRequestRemoved):
+                del self.reviewer_states[event.reviewer]
+            elif isinstance(event, Review) and event.state == "CHANGES_REQUESTED":
+                self.reviewer_states[event.reviewer] = ReviewerState.REQUESTED_CHANGES
+            elif isinstance(event, Review) and event.state == "DISMISSED":
+                self.reviewer_states[event.reviewer] = ReviewerState.REVIEW_REQUESTED
+            elif isinstance(event, Review) and (
+                event.state == "APPROVED"
+                or (event.state == "COMMENTED" and event.reviewer != "patrickkwang")
+            ):
+                # Both APPROVED and COMMENTED are considered approval.
+                self.reviewer_states[event.reviewer] = ReviewerState.APPROVED
+            elif isinstance(event, Merge):
+                new_state = PrState.MERGED
+            elif isinstance(event, ClosedEvent):
+                if self.state == PrState.MERGED:
+                    continue
+                new_state = PrState.CLOSED
+            # override new_state if currently waiting
+            if (
+                not self.reviewer_states["patrickkwang"] == ReviewerState.APPROVED
+                and self.state == PrState.WAITING
+            ):
+                if isinstance(event, PreviousPhaseApproved):
+                    new_state = PrState.UNDER_DEVELOPMENT
+                else:
+                    new_state = PrState.WAITING
+            previous_state, state, elapsed, elapsed_in_state = self.update_state(
+                event.created_at, new_state
+            )
+            if state == PrState.APPROVED and approval is None:
+                approval = event.created_at
+            entries.append((event.get_summary(), previous_state, elapsed_in_state))
+        self.wrap_up()
+        return entries, approval
