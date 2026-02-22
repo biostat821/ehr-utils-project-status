@@ -96,10 +96,10 @@ class PrStateMachine:
             new_state = PrState.MERGED
         elif isinstance(event, ClosedEvent):
             if self.state == PrState.MERGED:
-                return None
-            new_state = PrState.CLOSED
-        # override new_state if currently waiting
-        if (
+                new_state = PrState.MERGED
+            else:
+                new_state = PrState.CLOSED
+        elif (
             not self.reviewer_states["patrickkwang"] == ReviewerState.APPROVED
             and self.state == PrState.WAITING
         ):
@@ -107,11 +107,6 @@ class PrStateMachine:
                 new_state = PrState.UNDER_DEVELOPMENT
             else:
                 new_state = PrState.WAITING
-        elapsed_in_state = event.created_at - self.last_state_change_time
-        self.last_event_time = event.created_at
-
-        if new_state is not None:
-            pass
         elif self.reviewer_states["patrickkwang"] in (
             ReviewerState.APPROVED,
             ReviewerState.REVIEW_REQUESTED_POST_APPROVAL,
@@ -134,13 +129,15 @@ class PrStateMachine:
 
         if new_state == self.state:
             return None
-        duration = event.created_at - self.last_state_change_time
+        elapsed_in_state = event.created_at - self.last_state_change_time
         self._set_state(new_state, event.created_at)
 
         if self.previous_state == PrState.UNDER_REVIEW:
-            self.total_under_review_duration += duration
+            self.total_under_review_duration += elapsed_in_state
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
-            self.total_under_development_duration += duration
+            self.total_under_development_duration += elapsed_in_state
+
+        self.last_event_time = event.created_at
         return elapsed_in_state
 
     def _wrap_up(self):
