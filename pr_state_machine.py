@@ -101,9 +101,8 @@ class PrStateMachine:
 
     def _update_state(
         self, event_time: datetime, state: PrState | None = None
-    ) -> tuple[PrState, PrState, timedelta, timedelta | None]:
+    ) -> tuple[PrState, PrState, timedelta | None]:
         """Update the state in response to a new event."""
-        elapsed = event_time - self.last_event_time
         elapsed_in_state = event_time - self.last_state_change_time
         self.last_event_time = event_time
 
@@ -131,7 +130,7 @@ class PrStateMachine:
 
         duration = self._maybe_change_state(state, event_time)
         if duration is None:
-            return self.state, self.state, elapsed, None
+            return self.state, self.state, None
 
         if self.previous_state == PrState.UNDER_REVIEW:
             self.total_under_review_duration += duration
@@ -147,9 +146,9 @@ class PrStateMachine:
                 )
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += duration
-        return self.previous_state, self.state, elapsed, elapsed_in_state
+        return self.previous_state, self.state, elapsed_in_state
 
-    def wrap_up(self):
+    def _wrap_up(self):
         if self.state == PrState.UNDER_DEVELOPMENT:
             duration = now() - self.last_state_change_time
             self.total_under_development_duration += duration
@@ -202,11 +201,11 @@ class PrStateMachine:
                     new_state = PrState.UNDER_DEVELOPMENT
                 else:
                     new_state = PrState.WAITING
-            previous_state, state, elapsed, elapsed_in_state = self._update_state(
+            previous_state, state, elapsed_in_state = self._update_state(
                 event.created_at, new_state
             )
             if state == PrState.APPROVED and approval is None:
                 approval = event.created_at
             entries.append(Entry(event.get_summary(), previous_state, elapsed_in_state))
-        self.wrap_up()
+        self._wrap_up()
         return entries, approval
