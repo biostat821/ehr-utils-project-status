@@ -275,13 +275,13 @@ class EhrProjectStatus:
         2025, 4, 25, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
     )
 
-    def generate_pr_summary(
-        self,
+    def get_due_date(
+        self: Self,
         pr: PullRequest,
         phase: int | None = None,
         last_approval: datetime | None = None,
-        prior_adjusted_lateness: timedelta = timedelta(0),
-    ) -> tuple[str, datetime | None, timedelta]:
+    ) -> tuple[datetime | None, datetime, Extension | None]:
+        """Get due date for PR."""
         assert phase in PHASES
         due_date = None
         if phase is not None:
@@ -298,6 +298,19 @@ class EhrProjectStatus:
                 if rolling_due_date
                 else scheduled_due_date
             )
+        return due_date, original_due_date, extension
+
+    def generate_pr_summary(
+        self,
+        pr: PullRequest,
+        phase: int | None = None,
+        last_approval: datetime | None = None,
+        prior_adjusted_lateness: timedelta = timedelta(0),
+    ) -> tuple[str, datetime | None, timedelta]:
+        """Generate PR summary."""
+        due_date, original_due_date, extension = self.get_due_date(
+            pr, phase, last_approval
+        )
         all_events = sorted(
             [Created(pr.created_at)]
             + pr.timeline_events
