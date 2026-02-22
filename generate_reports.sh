@@ -7,7 +7,9 @@ do
     username=${last%$'\r'}
     echo $username
     ./project_status.py $username "$name"
-    pdflatex -output-directory outputs outputs/$username.tex
-    echo "outputs/$username.pdf"
-    osascript sendMail.scpt $username $email $name
+    if [ -f "outputs/$username.tex" ]; then
+        pdflatex -output-directory outputs outputs/$username.tex
+        echo "outputs/$username.pdf"
+    fi
+    # osascript sendMail.scpt $username $email $name
 done  < <(tail -n +2 $1)
