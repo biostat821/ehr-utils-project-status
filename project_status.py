@@ -138,9 +138,9 @@ def create_page_header(phase: int, pr: PullRequest) -> str:
     )
 
 
-def write_document(username: str, summaries):
+def write_document(username: str, pr_reports: list[tuple[int, PullRequest, str]]):
     pages = [
-        create_page_header(phase, pr) + summary for phase, pr, summary in summaries
+        create_page_header(phase, pr) + pr_report for phase, pr, pr_report in pr_reports
     ]
     document = textwrap.dedent(f"""
                 \\documentclass{{article}}
@@ -192,7 +192,7 @@ class DocumentSpec:
     points_deducted: int | None
 
 
-def construct_document(documentSpec: DocumentSpec) -> str:
+def _construct_pr_report(documentSpec: DocumentSpec) -> str:
     document = ""
     if documentSpec.due_date:
         document += "approval due"
@@ -298,7 +298,7 @@ class EhrProjectStatus:
         )
         return DueDate(due_date, original_due_date, extension)
 
-    def _generate_pr_summary(
+    def _generate_pr_report(
         self,
         pr: PullRequest,
         phase: int | None = None,
@@ -332,7 +332,7 @@ class EhrProjectStatus:
         else:
             points_deducted = None
 
-        document = construct_document(
+        pr_report = _construct_pr_report(
             DocumentSpec(
                 due_date,
                 entries,
@@ -350,7 +350,7 @@ class EhrProjectStatus:
                 f.write(
                     f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
                 )
-        return document, approval, adjusted_lateness
+        return pr_report, approval, adjusted_lateness
 
     def _infer_phases(self, pr: PullRequest, next_phase: int) -> list[int]:
         """Infer which phase(s) this PR is for.
@@ -403,23 +403,23 @@ class EhrProjectStatus:
     def generate_pr_summaries(self: Self) -> None:
         """Generate PR summaries."""
         phase_prs = self._get_phase_prs()
-        summaries = []
+        pr_reports = []
 
         last_approval = None
         for phase, prs in sorted(phase_prs.items()):
             cumulative_adjusted_lateness = timedelta(0)
             for pr in prs:
-                summary, approval, adjusted_lateness = self._generate_pr_summary(
+                pr_report, approval, adjusted_lateness = self._generate_pr_report(
                     pr, phase, last_approval, cumulative_adjusted_lateness
                 )
                 cumulative_adjusted_lateness += adjusted_lateness
-                summaries.append((phase, pr, summary))
+                pr_reports.append((phase, pr, pr_report))
             if approval and phase < NUM_PHASES:
                 last_approval = approval
             else:
                 last_approval = None
 
-        write_document(self.username, summaries)
+        write_document(self.username, pr_reports)
 
 
 if __name__ == "__main__":
