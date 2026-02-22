@@ -2,6 +2,7 @@
 set -e
 
 echo "name,username,phase,pr,score" > "outputs/_summary.csv"
+echo "name,username,phase,pr,state,late_by,waiting_for" > "outputs/_state_summary.csv"
 while IFS=, read -r email name last
 do
     username=${last%$'\r'}

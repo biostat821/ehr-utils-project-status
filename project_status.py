@@ -19,7 +19,7 @@ from github_client import (
     PreviousPhaseApproved,
     PullRequest,
 )
-from pr_state_machine import Entry, PrStateMachine
+from pr_state_machine import Entry, PrStateMachine, PrState
 
 NUM_PHASES = 6
 PHASES = set(range(1, NUM_PHASES + 1))
@@ -280,6 +280,16 @@ class EhrProjectStatus:
                 f.write(
                     f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
                 )
+        with open("outputs/_state_summary.csv", "a") as f:
+            waiting_for = None
+            if (
+                pr_state_machine.last_review_requested
+                and pr_state_machine.state == PrState.UNDER_REVIEW
+            ):
+                waiting_for = now() - pr_state_machine.last_review_requested
+            f.write(
+                f'"{self.name}",{self.username},{phase},{pr.permalink},{pr_state_machine.state},{late_by},{waiting_for}\n'
+            )
         return pr_report, approval, late_by
 
     def _infer_phases(self, pr: PullRequest, next_phase: int) -> list[int]:
