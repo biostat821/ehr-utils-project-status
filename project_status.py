@@ -3,7 +3,6 @@
 
 import argparse
 import csv
-from itertools import accumulate
 import math
 import os
 import re
@@ -11,10 +10,22 @@ import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from itertools import accumulate
 from typing import Self
 from zoneinfo import ZoneInfo
 
-import httpx
+from github_client import (
+    ClosedEvent,
+    Created,
+    GithubClient,
+    Merge,
+    PreviousPhaseApproved,
+    PullRequest,
+    Review,
+    ReviewDismissed,
+    ReviewRequested,
+    ReviewRequestRemoved,
+)
 from pr_state_machine import PrState, PrStateMachine, ReviewerState
 
 NUM_PHASES = 6
@@ -82,118 +93,6 @@ def td_to_str(td: timedelta) -> str:
 
 
 @dataclass
-class Event:
-    created_at: datetime
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & {type(self).__name__:20s}"
-
-    @property
-    def creation_time(self: Self) -> str:
-        return self.created_at.strftime("%Y-%m-%d %H:%M:%S")
-
-
-@dataclass
-class PullRequest:
-    owner: str
-    branch: str
-    created_at: datetime
-    title: str
-    permalink: str
-    number: int
-    state: str
-    based_on_main: bool
-    behind_base: bool
-    timeline_events: list[Event]
-
-    @staticmethod
-    def from_dict(pr, username, main_id):
-        return PullRequest(
-            username,
-            branch=pr["headRefName"],
-            created_at=et_datetime(pr["createdAt"]),
-            title=pr["title"],
-            permalink=pr["permalink"],
-            number=pr["number"],
-            state=pr["state"],
-            # baseRef can be None if the base branch has been deleted
-            based_on_main=(
-                base_id := pr["baseRef"]["target"]["id"] if pr["baseRef"] else None
-            )
-            == main_id,
-            behind_base=base_id
-            not in (
-                [
-                    node["id"]
-                    for node in pr["commits"]["nodes"][0]["commit"]["history"]["nodes"]
-                ]
-                if pr["commits"]["nodes"]  # there may be no commits
-                else []
-            ),
-            timeline_events=parse_events(pr),
-        )
-
-
-@dataclass
-class Created(Event):
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & CREATED"
-
-
-@dataclass
-class PreviousPhaseApproved(Event):
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & PREVIOUS_PHASE_APPROVED"
-
-
-@dataclass
-class ReviewRequested(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEW_REQUESTED from {self.reviewer}"
-
-
-@dataclass
-class ReviewRequestRemoved(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEW_REQUEST_REMOVED from {self.reviewer}"
-
-
-@dataclass
-class ReviewDismissed(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEW_DISMISSED from {self.reviewer}"
-
-
-@dataclass
-class Review(Event):
-    reviewer: str
-    state: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return (
-            f"{self.creation_time} & REVIEWED ({self.state.lower()}) by {self.reviewer}"
-        )
-
-
-@dataclass
-class Merge(Event):
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & MERGED"
-
-
-@dataclass
-class ClosedEvent(Event):
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & CLOSED"
-
-
-@dataclass
 class Extension:
     name: str
     username: str
@@ -228,76 +127,6 @@ def get_phase_mapping_overrides(filename: str) -> dict[str, dict[int, list[int]]
                 int(row["phase"])
             )
     return phase_mapping_overrides
-
-
-def parse_events(pr) -> list[Event]:
-    timeline_items = [edge["node"] for edge in pr["timelineItems"]["edges"]]
-    reviews_requested = [
-        ReviewRequested(
-            created_at=et_datetime(timeline_item["createdAt"]),
-            reviewer=timeline_item["requestedReviewer"]["login"],
-        )
-        for timeline_item in timeline_items
-        if timeline_item["__typename"] == "ReviewRequestedEvent"
-        and "login"
-        in timeline_item[
-            "requestedReviewer"
-        ]  # there is no "login" if the reviewer is Copilot
-    ]
-    reviews_dismissed = [
-        ReviewDismissed(
-            created_at=et_datetime(timeline_item["createdAt"]),
-            reviewer=timeline_item["review"]["author"]["login"],
-        )
-        for timeline_item in timeline_items
-        if timeline_item["__typename"] == "ReviewDismissedEvent"
-    ]
-    review_requests_removed = [
-        ReviewRequestRemoved(
-            created_at=et_datetime(timeline_item["createdAt"]),
-            reviewer=timeline_item["requestedReviewer"]["login"],
-        )
-        for timeline_item in timeline_items
-        if timeline_item["__typename"] == "ReviewRequestRemovedEvent"
-    ]
-    reviews = [
-        Review(
-            created_at=et_datetime(timeline_item["createdAt"]),
-            reviewer=timeline_item["author"]["login"],
-            # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
-            state="APPROVED"
-            if timeline_item["state"] == "DISMISSED"
-            else timeline_item["state"],
-        )
-        for timeline_item in timeline_items
-        if timeline_item["__typename"] == "PullRequestReview"
-        and timeline_item["author"]["login"]
-        in ("patrickkwang", "hu-i-oop", "JasonMa-778")
-    ]
-    merges = [
-        Merge(
-            created_at=et_datetime(timeline_item["createdAt"]),
-        )
-        for timeline_item in timeline_items
-        if timeline_item["__typename"] == "MergedEvent"
-    ]
-    closes = [
-        ClosedEvent(
-            created_at=et_datetime(timeline_item["createdAt"]),
-        )
-        for timeline_item in timeline_items
-        if timeline_item["__typename"] == "ClosedEvent"
-    ]
-
-    return sorted(
-        reviews_requested
-        + reviews
-        + review_requests_removed
-        + reviews_dismissed
-        + merges
-        + closes,
-        key=lambda event: event.created_at,
-    )
 
 
 def create_page_header(phase: int, pr: PullRequest) -> str:
@@ -413,15 +242,8 @@ class EhrProjectStatus:
 
     def __init__(self: Self, organization: str, username: str, name: str):
         """Initialize."""
-        self.organization = organization
         self.username = username
         self.name = name
-        self.auth_token = os.getenv("GITHUB_TOKEN")
-        self.headers = {
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {self.auth_token}",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
         self.extensions = {
             (extension.username, extension.phase): extension
             for extension in get_extensions("extensions.csv")
@@ -429,9 +251,7 @@ class EhrProjectStatus:
         self.phase_mapping_overrides = get_phase_mapping_overrides(
             "phase_mapping_overrides.csv"
         )
-
-    def repo_name(self: Self, username: str):
-        return f"ehr-utils-{username}"
+        self.github_client = GithubClient(organization, username, name)
 
     first_due_date = datetime(
         2025, 2, 12, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
@@ -601,7 +421,7 @@ class EhrProjectStatus:
 
     def generate_pr_summaries(self: Self) -> None:
         """Generate PR summaries."""
-        prs = [pr for pr in self.list_prs() if pr.based_on_main]
+        prs = [pr for pr in self.github_client.list_prs() if pr.based_on_main]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > len(self.merge_due_dates):
@@ -644,118 +464,6 @@ class EhrProjectStatus:
                 last_approval = None
 
         write_document(self.username, summaries)
-
-    def list_prs(self: Self) -> list[PullRequest]:
-        """Get data for PRs."""
-        response = httpx.post(
-            "https://api.github.com/graphql",
-            headers=self.headers,
-            json={
-                "query": f"""
-                {{
-                    repository(owner: "{self.organization}", name: "{self.repo_name(self.username)}") {{
-                        defaultBranchRef {{
-                            target {{
-                                ... on Commit {{
-                                    id
-                                }}
-                            }}
-                        }}
-                        pullRequests(first: 100, states:[CLOSED, OPEN, MERGED]) {{
-                            edges {{
-                                node {{
-                                    createdAt
-                                    number
-                                    state
-                                    permalink
-                                    title
-                                    baseRef {{
-                                        target {{
-                                            ... on Commit {{
-                                                id
-                                            }}
-                                        }}
-                                    }}
-                                    headRefName
-                                    commits(first: 1) {{
-                                        nodes {{
-                                            commit {{
-                                                history(first: 100) {{
-                                                    nodes {{
-                                                        id
-                                                    }}
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                    timelineItems(last: 100) {{
-                                        edges {{
-                                            node {{
-                                                __typename
-                                                ... on PullRequestReview {{
-                                                    createdAt
-                                                    author {{
-                                                        login
-                                                    }}
-                                                    body
-                                                    state
-                                                }}
-                                                ... on ReviewRequestedEvent {{
-                                                    createdAt
-                                                    requestedReviewer {{
-                                                    ... on User {{
-                                                        login
-                                                    }}
-                                                    }}
-                                                }}
-                                                ... on ReviewRequestRemovedEvent {{
-                                                    createdAt
-                                                    requestedReviewer {{
-                                                    ... on User {{
-                                                        login
-                                                    }}
-                                                    }}
-                                                }}
-                                                ... on ReviewDismissedEvent {{
-                                                    createdAt
-                                                    review {{
-                                                    author {{
-                                                        login
-                                                    }}
-                                                    }}
-                                                }}
-                                                ... on MergedEvent {{
-                                                    createdAt
-                                                }}
-                                                ... on ClosedEvent {{
-                                                    createdAt
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-                """
-            },
-        )
-        if response.json()["data"]["repository"] is None:
-            return []
-        main_id = response.json()["data"]["repository"]["defaultBranchRef"]["target"][
-            "id"
-        ]
-
-        return sorted(
-            [
-                PullRequest.from_dict(edge["node"], self.username, main_id)
-                for edge in response.json()["data"]["repository"]["pullRequests"][
-                    "edges"
-                ]
-            ],
-            key=lambda pr: pr.created_at,
-        )
 
 
 if __name__ == "__main__":
