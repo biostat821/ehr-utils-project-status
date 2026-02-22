@@ -181,26 +181,15 @@ class DueDate:
 
 @dataclass
 class DocumentSpec:
-    due_date: DueDate | None
     entries: list[Entry]
     total_under_development_duration: timedelta
     total_under_review_duration: timedelta
-    out_of_slo_duration: timedelta
     late_by: timedelta | None
-    adjusted_lateness: timedelta
-    cumulative_adjusted_lateness: timedelta
     points_deducted: int | None
 
 
 def _construct_pr_report(documentSpec: DocumentSpec) -> str:
     document = ""
-    if documentSpec.due_date:
-        document += "approval due"
-        if documentSpec.due_date.due_date != documentSpec.due_date.original_due_date:
-            document += f" \\sout{{{documentSpec.due_date.original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
-        document += f" {documentSpec.due_date.due_date.strftime('%Y-%m-%d %H:%M:%S')}"
-        if documentSpec.due_date.extension:
-            document += " (extension granted)\\\\\n"
     document += textwrap.dedent("""
                                 \\setlength\\LTleft{0pt}
                                 \\setlength\\LTright{0pt}
@@ -220,12 +209,8 @@ def _construct_pr_report(documentSpec: DocumentSpec) -> str:
     document += "\midrule\n"
     document += f"&& under development for {pad_to(td_to_str(documentSpec.total_under_development_duration), 17)} \\\\\n"
     document += f"&& under review for {pad_to(td_to_str(documentSpec.total_under_review_duration), 17)} \\\\\n"
-    document += f"&& reviews out of SLO for {pad_to(td_to_str(documentSpec.out_of_slo_duration), 17)} \\\\\n"
     if documentSpec.late_by:
         document += f"&& late by {pad_to(td_to_str(documentSpec.late_by), 17)} \\\\\n"
-    document += f"&& adjusted lateness: {pad_to(td_to_str(documentSpec.adjusted_lateness), 17)} \\\\\n"
-    document += "\midrule\n"
-    document += f"&& cumulative adjusted lateness: {pad_to(td_to_str(documentSpec.cumulative_adjusted_lateness), 17)} \\\\\n"
     if documentSpec.points_deducted is not None:
         document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(documentSpec.points_deducted, 17)}}} \\\\\n"
     document += textwrap.dedent("""
@@ -251,52 +236,8 @@ class EhrProjectStatus:
         )
         self.github_client = GithubClient(organization, username, name)
 
-    first_due_date = datetime(
-        2025, 2, 12, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
-    )
-    phase_durations = {
-        1: timedelta(days=14),
-        2: timedelta(days=14),
-        3: timedelta(days=21),
-        4: timedelta(days=7),
-        5: timedelta(days=14),
-        6: timedelta(days=14),
-    }
-    merge_due_dates: list[datetime] = list(
-        accumulate(
-            list(phase_durations.values())[1:],
-            lambda dt, td: dt + td,
-            initial=first_due_date,
-        )
-    )
-    final_due_date = datetime(
-        2025, 4, 25, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
-    )
-
-    def _get_due_date(
-        self: Self,
-        pr: PullRequest,
-        phase: int | None = None,
-        last_approval: datetime | None = None,
-    ) -> DueDate | None:
-        """Get due date for PR."""
-        assert phase in PHASES
-        if phase is None:
-            return None
-        extension = self.extensions.get((pr.owner, phase))
-        rolling_due_date = (
-            last_approval + self.phase_durations[phase]
-            if last_approval
-            else self.first_due_date
-        )
-        original_due_date = self.merge_due_dates[phase - 1]
-        scheduled_due_date = extension.due_date if extension else original_due_date
-        due_date = (
-            min(max(rolling_due_date, scheduled_due_date), self.final_due_date)
-            if rolling_due_date
-            else scheduled_due_date
-        )
-        return DueDate(due_date, original_due_date, extension)
+    start_time = datetime(2026, 2, 13, 23, 59, 59, tzinfo=ZoneInfo("America/New_York"))
+    phase_time_budget = timedelta(days=7)
 
     def _generate_pr_report(
         self,
@@ -306,42 +247,30 @@ class EhrProjectStatus:
         prior_adjusted_lateness: timedelta = timedelta(0),
     ) -> tuple[str, datetime | None, timedelta]:
         """Generate PR summary."""
-        due_date = self._get_due_date(pr, phase, last_approval)
+        start_time = last_approval if last_approval else self.start_time
         all_events = sorted(
             [Created(pr.created_at)]
             + pr.timeline_events
             + ([PreviousPhaseApproved(last_approval)] if last_approval else []),
             key=lambda event: event.created_at,
         )
-        pr_state_machine = PrStateMachine(pr.created_at, last_approval)
+        pr_state_machine = PrStateMachine(pr.created_at, start_time)
         entries, approval = pr_state_machine.process_events(all_events)
-        out_of_slo = pr_state_machine.out_of_slo_under_review_duration
-        if due_date and pr_state_machine.finish_time:
-            late_by = max(
-                pr_state_machine.finish_time - due_date.due_date, timedelta(0)
-            )
-            adjusted_lateness = max(late_by - out_of_slo, timedelta(0))
-        else:
-            late_by = None
-            adjusted_lateness = -out_of_slo
-        cumulative_adjusted_lateness = adjusted_lateness + prior_adjusted_lateness
+
+        late_by = (
+            pr_state_machine.total_under_development_duration - self.phase_time_budget
+        )
         if pr_state_machine.finish_time:
-            points_deducted = max(
-                math.ceil(cumulative_adjusted_lateness / timedelta(days=1)), 0
-            )
+            points_deducted = max(math.ceil(late_by / timedelta(days=1)), 0)
         else:
             points_deducted = None
 
         pr_report = _construct_pr_report(
             DocumentSpec(
-                due_date,
                 entries,
                 pr_state_machine.total_under_development_duration,
                 pr_state_machine.total_under_review_duration,
-                out_of_slo,
                 late_by,
-                adjusted_lateness,
-                cumulative_adjusted_lateness,
                 points_deducted,
             ),
         )
@@ -350,7 +279,7 @@ class EhrProjectStatus:
                 f.write(
                     f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
                 )
-        return pr_report, approval, adjusted_lateness
+        return pr_report, approval, late_by
 
     def _infer_phases(self, pr: PullRequest, next_phase: int) -> list[int]:
         """Infer which phase(s) this PR is for.
@@ -375,7 +304,7 @@ class EhrProjectStatus:
         prs = [pr for pr in self.github_client.list_prs() if pr.based_on_main]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
-        if len(not_closed_prs) > len(self.merge_due_dates):
+        if len(not_closed_prs) > NUM_PHASES:
             raise ValueError("Too many open/merged PRs!")
         closed_pr_phases = [
             (pr, guess_phase(pr.title)) for idx, pr in enumerate(closed_prs)
