@@ -366,8 +366,7 @@ class EhrProjectStatus:
             return []
         return [next_phase]
 
-    def generate_pr_summaries(self: Self) -> None:
-        """Generate PR summaries."""
+    def _get_phase_prs(self: Self) -> dict[int, list[PullRequest]]:
         prs = [pr for pr in self.github_client.list_prs() if pr.based_on_main]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
@@ -394,6 +393,11 @@ class EhrProjectStatus:
         for pr, phases in not_closed_pr_phases:
             for phase in phases:
                 phase_prs[phase].append(pr)
+        return phase_prs
+
+    def generate_pr_summaries(self: Self) -> None:
+        """Generate PR summaries."""
+        phase_prs = self._get_phase_prs()
         summaries = []
 
         last_approval = None
