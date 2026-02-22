@@ -65,7 +65,6 @@ class PrStateMachine:
             lambda: ReviewerState.NONE
         )
         self.total_under_review_duration: timedelta = timedelta(0)
-        self.out_of_slo_under_review_duration: timedelta = timedelta(0)
         self.total_under_development_duration: timedelta = timedelta(0)
         self._state = PrState.WAITING if last_approval else PrState.UNDER_DEVELOPMENT
         self._previous_state = (
@@ -134,16 +133,6 @@ class PrStateMachine:
 
         if self.previous_state == PrState.UNDER_REVIEW:
             self.total_under_review_duration += duration
-            if self.finish_time:
-                # exclude duration since "finish" from out-of-SLO duration
-                self.out_of_slo_under_review_duration += max(
-                    timedelta(0),
-                    duration - (event_time - self.finish_time) - timedelta(days=3),
-                )
-            else:
-                self.out_of_slo_under_review_duration += max(
-                    timedelta(0), duration - timedelta(days=3)
-                )
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += duration
         return self.previous_state, self.state, elapsed_in_state
