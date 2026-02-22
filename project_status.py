@@ -244,7 +244,6 @@ class EhrProjectStatus:
         pr: PullRequest,
         phase: int | None = None,
         last_approval: datetime | None = None,
-        prior_adjusted_lateness: timedelta = timedelta(0),
     ) -> tuple[str, datetime | None, timedelta]:
         """Generate PR summary."""
         start_time = last_approval if last_approval else self.start_time
@@ -336,12 +335,10 @@ class EhrProjectStatus:
 
         last_approval = None
         for phase, prs in sorted(phase_prs.items()):
-            cumulative_adjusted_lateness = timedelta(0)
             for pr in prs:
-                pr_report, approval, adjusted_lateness = self._generate_pr_report(
-                    pr, phase, last_approval, cumulative_adjusted_lateness
+                pr_report, approval, _ = self._generate_pr_report(
+                    pr, phase, last_approval
                 )
-                cumulative_adjusted_lateness += adjusted_lateness
                 pr_reports.append((phase, pr, pr_report))
             if approval and phase < NUM_PHASES:
                 last_approval = approval
