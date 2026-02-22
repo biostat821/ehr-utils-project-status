@@ -77,7 +77,7 @@ class PrStateMachine:
     def last_state_change_time(self) -> datetime:
         return self._last_state_change_time
 
-    def set_state(self, state: PrState, event_time: datetime):
+    def _set_state(self, state: PrState, event_time: datetime):
         self._last_state_change_time = event_time
         self._previous_state = self._state
         self._state = state
@@ -86,15 +86,15 @@ class PrStateMachine:
     def previous_state(self) -> PrState:
         return self._previous_state
 
-    def maybe_change_state(self, state: PrState, event_time: datetime):
+    def _maybe_change_state(self, state: PrState, event_time: datetime):
         """Change states if the new state is different from the old one."""
         if state == self.state:
             return None
         duration = event_time - self.last_state_change_time
-        self.set_state(state, event_time)
+        self._set_state(state, event_time)
         return duration
 
-    def update_state(
+    def _update_state(
         self, event_time: datetime, state: PrState | None = None
     ) -> tuple[PrState, PrState, timedelta, timedelta | None]:
         """Update the state in response to a new event."""
@@ -124,7 +124,7 @@ class PrStateMachine:
         else:
             state = PrState.UNDER_DEVELOPMENT
 
-        duration = self.maybe_change_state(state, event_time)
+        duration = self._maybe_change_state(state, event_time)
         if duration is None:
             return self.state, self.state, elapsed, None
 
@@ -197,7 +197,7 @@ class PrStateMachine:
                     new_state = PrState.UNDER_DEVELOPMENT
                 else:
                     new_state = PrState.WAITING
-            previous_state, state, elapsed, elapsed_in_state = self.update_state(
+            previous_state, state, elapsed, elapsed_in_state = self._update_state(
                 event.created_at, new_state
             )
             if state == PrState.APPROVED and approval is None:

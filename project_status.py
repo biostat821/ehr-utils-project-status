@@ -266,7 +266,7 @@ class EhrProjectStatus:
         2025, 4, 25, 23, 59, 59, tzinfo=ZoneInfo("America/New_York")
     )
 
-    def get_due_date(
+    def _get_due_date(
         self: Self,
         pr: PullRequest,
         phase: int | None = None,
@@ -291,7 +291,7 @@ class EhrProjectStatus:
             )
         return due_date, original_due_date, extension
 
-    def generate_pr_summary(
+    def _generate_pr_summary(
         self,
         pr: PullRequest,
         phase: int | None = None,
@@ -299,7 +299,7 @@ class EhrProjectStatus:
         prior_adjusted_lateness: timedelta = timedelta(0),
     ) -> tuple[str, datetime | None, timedelta]:
         """Generate PR summary."""
-        due_date, original_due_date, extension = self.get_due_date(
+        due_date, original_due_date, extension = self._get_due_date(
             pr, phase, last_approval
         )
         all_events = sorted(
@@ -347,7 +347,7 @@ class EhrProjectStatus:
                 )
         return document, approval, adjusted_lateness
 
-    def infer_phases(self, pr: PullRequest, next_phase: int) -> list[int]:
+    def _infer_phases(self, pr: PullRequest, next_phase: int) -> list[int]:
         """Infer which phase(s) this PR is for.
 
         next_phases indicates the next unclaimed phase.
@@ -383,7 +383,7 @@ class EhrProjectStatus:
                 # Too many not-closed PRs! Treat the remainder as closed.
                 closed_pr_phases.append((pr, guess_phase(pr.title)))
                 continue
-            phases = self.infer_phases(pr, max_phase + 1)
+            phases = self._infer_phases(pr, max_phase + 1)
             if phases:
                 max_phase = max(phases + [max_phase])
             not_closed_pr_phases.append((pr, phases))
@@ -400,7 +400,7 @@ class EhrProjectStatus:
         for phase, prs in sorted(phase_prs.items()):
             cumulative_adjusted_lateness = timedelta(0)
             for pr in prs:
-                summary, approval, adjusted_lateness = self.generate_pr_summary(
+                summary, approval, adjusted_lateness = self._generate_pr_summary(
                     pr, phase, last_approval, cumulative_adjusted_lateness
                 )
                 cumulative_adjusted_lateness += adjusted_lateness
