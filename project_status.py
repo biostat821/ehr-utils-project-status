@@ -330,7 +330,7 @@ class EhrProjectStatus:
                 phase_prs[phase].append(pr)
         return phase_prs
 
-    def generate_pr_summaries(self: Self) -> None:
+    def generate_project_report(self: Self) -> None:
         """Generate PR summaries."""
         phase_prs = self._get_phase_prs()
         pr_reports = []
@@ -362,6 +362,6 @@ if __name__ == "__main__":
     try:
         EhrProjectStatus(
             "biostat821-2026", args.username.strip(), args.name.strip()
-        ).generate_pr_summaries()
+        ).generate_project_report()
     except Exception as e:
         print(f"Failed to generate PR summaries. {e}")
