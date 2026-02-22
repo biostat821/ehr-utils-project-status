@@ -55,20 +55,21 @@ class Entry:
 class PrStateMachine:
     """Models PR state transitions."""
 
-    def __init__(self, create_time: datetime, last_approval: datetime | None):
+    def __init__(
+        self, create_time: datetime, phase_start_time: datetime, should_wait: bool
+    ):
         """Initialize."""
-        self.last_event_time = (
-            min(create_time, last_approval) if last_approval else create_time
+        self._last_state_change_time = (
+            min(create_time, phase_start_time) if phase_start_time else create_time
         )
-        self._last_state_change_time = self.last_event_time
         self.reviewer_states: dict[str, ReviewerState] = defaultdict(
             lambda: ReviewerState.NONE
         )
         self.total_under_review_duration: timedelta = timedelta(0)
         self.total_under_development_duration: timedelta = timedelta(0)
-        self._state = PrState.WAITING if last_approval else PrState.UNDER_DEVELOPMENT
+        self._state = PrState.WAITING if should_wait else PrState.UNDER_DEVELOPMENT
         self._previous_state = (
-            PrState.WAITING if last_approval else PrState.UNDER_DEVELOPMENT
+            PrState.WAITING if should_wait else PrState.UNDER_DEVELOPMENT
         )
         self.last_review_requested: datetime | None = None
         self.finish_time: datetime | None = None
@@ -137,7 +138,6 @@ class PrStateMachine:
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += elapsed_in_state
 
-        self.last_event_time = event.created_at
         return elapsed_in_state
 
     def _wrap_up(self):

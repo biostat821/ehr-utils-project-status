@@ -246,14 +246,16 @@ class EhrProjectStatus:
         last_approval: datetime | None = None,
     ) -> tuple[str, datetime | None, timedelta]:
         """Generate PR summary."""
-        start_time = last_approval if last_approval else self.start_time
+        phase_start_time = last_approval if last_approval else self.start_time
         all_events = sorted(
             [Created(pr.created_at)]
             + pr.timeline_events
             + ([PreviousPhaseApproved(last_approval)] if last_approval else []),
             key=lambda event: event.created_at,
         )
-        pr_state_machine = PrStateMachine(pr.created_at, start_time)
+        pr_state_machine = PrStateMachine(
+            pr.created_at, phase_start_time, should_wait=last_approval is not None
+        )
         entries, approval = pr_state_machine.process_events(all_events)
 
         late_by = (
