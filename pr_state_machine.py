@@ -3,6 +3,12 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
+from zoneinfo import ZoneInfo
+
+
+def now() -> datetime:
+    """Get current date time in Eastern time zone."""
+    return datetime.now(tz=ZoneInfo("America/New_York")).replace(microsecond=0)
 
 
 class ReviewerState(Enum):
@@ -122,3 +128,11 @@ class PrStateMachine:
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += duration
         return self.previous_state, self.state, elapsed, elapsed_in_state
+
+    def wrap_up(self):
+        if self.state == PrState.UNDER_DEVELOPMENT:
+            duration = now() - self.last_state_change_time
+            self.total_under_development_duration += duration
+        elif self.state == PrState.UNDER_REVIEW:
+            duration = now() - self.last_state_change_time
+            self.total_under_review_duration += duration

@@ -106,6 +106,33 @@ class PullRequest:
     behind_base: bool
     timeline_events: list[Event]
 
+    @staticmethod
+    def from_dict(pr, username, main_id):
+        return PullRequest(
+            username,
+            branch=pr["headRefName"],
+            created_at=et_datetime(pr["createdAt"]),
+            title=pr["title"],
+            permalink=pr["permalink"],
+            number=pr["number"],
+            state=pr["state"],
+            # baseRef can be None if the base branch has been deleted
+            based_on_main=(
+                base_id := pr["baseRef"]["target"]["id"] if pr["baseRef"] else None
+            )
+            == main_id,
+            behind_base=base_id
+            not in (
+                [
+                    node["id"]
+                    for node in pr["commits"]["nodes"][0]["commit"]["history"]["nodes"]
+                ]
+                if pr["commits"]["nodes"]  # there may be no commits
+                else []
+            ),
+            timeline_events=parse_events(pr),
+        )
+
 
 @dataclass
 class Created(Event):
@@ -203,22 +230,93 @@ def get_phase_mapping_overrides(filename: str) -> dict[str, dict[int, list[int]]
     return phase_mapping_overrides
 
 
-def write_document(username: str, summaries):
-    def create_page_header(phase: int, pr: PullRequest) -> str:
-        return (
-            f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
-            + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
-            + f'"{escape_latex(pr.title)}" (branch "{pr.branch}")\\\\\n'
-            + f"\\url{{{pr.permalink}}}\\\\\n"
-            + (
-                "\\\\\n"
-                + "\\textbf{inferred phase}:\\\\\n"
-                + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
-                if phase in PHASES
-                else ""
-            )
+def parse_events(pr) -> list[Event]:
+    timeline_items = [edge["node"] for edge in pr["timelineItems"]["edges"]]
+    reviews_requested = [
+        ReviewRequested(
+            created_at=et_datetime(timeline_item["createdAt"]),
+            reviewer=timeline_item["requestedReviewer"]["login"],
         )
+        for timeline_item in timeline_items
+        if timeline_item["__typename"] == "ReviewRequestedEvent"
+        and "login"
+        in timeline_item[
+            "requestedReviewer"
+        ]  # there is no "login" if the reviewer is Copilot
+    ]
+    reviews_dismissed = [
+        ReviewDismissed(
+            created_at=et_datetime(timeline_item["createdAt"]),
+            reviewer=timeline_item["review"]["author"]["login"],
+        )
+        for timeline_item in timeline_items
+        if timeline_item["__typename"] == "ReviewDismissedEvent"
+    ]
+    review_requests_removed = [
+        ReviewRequestRemoved(
+            created_at=et_datetime(timeline_item["createdAt"]),
+            reviewer=timeline_item["requestedReviewer"]["login"],
+        )
+        for timeline_item in timeline_items
+        if timeline_item["__typename"] == "ReviewRequestRemovedEvent"
+    ]
+    reviews = [
+        Review(
+            created_at=et_datetime(timeline_item["createdAt"]),
+            reviewer=timeline_item["author"]["login"],
+            # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
+            state="APPROVED"
+            if timeline_item["state"] == "DISMISSED"
+            else timeline_item["state"],
+        )
+        for timeline_item in timeline_items
+        if timeline_item["__typename"] == "PullRequestReview"
+        and timeline_item["author"]["login"]
+        in ("patrickkwang", "hu-i-oop", "JasonMa-778")
+    ]
+    merges = [
+        Merge(
+            created_at=et_datetime(timeline_item["createdAt"]),
+        )
+        for timeline_item in timeline_items
+        if timeline_item["__typename"] == "MergedEvent"
+    ]
+    closes = [
+        ClosedEvent(
+            created_at=et_datetime(timeline_item["createdAt"]),
+        )
+        for timeline_item in timeline_items
+        if timeline_item["__typename"] == "ClosedEvent"
+    ]
 
+    return sorted(
+        reviews_requested
+        + reviews
+        + review_requests_removed
+        + reviews_dismissed
+        + merges
+        + closes,
+        key=lambda event: event.created_at,
+    )
+
+
+def create_page_header(phase: int, pr: PullRequest) -> str:
+    return (
+        f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
+        + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
+        + f'"{escape_latex(pr.title)}" (branch "{pr.branch}")\\\\\n'
+        + f"\\url{{{pr.permalink}}}\\\\\n"
+        + (
+            "\\\\\n"
+            + "\\textbf{inferred phase}:\\\\\n"
+            + f"{phase:02} (\\url{{https://github.com/biostat821/ehr-utils-project/blob/main/phase{phase:02}.md}})\\\\\n"
+            if phase in PHASES
+            else ""
+        )
+    )
+
+
+def write_document(username: str, summaries):
     pages = [
         create_page_header(phase, pr) + summary for phase, pr, summary in summaries
     ]
@@ -243,6 +341,8 @@ def write_document(username: str, summaries):
                 \\ttfamily
                 \\fontseries{{l}}\\selectfont
                 \\small""").strip()
+    if not pages:
+        document += "\nNo pull requests"
     document += "\n\\pagebreak\n".join(pages)
     document += "\n\\end{document}"
     document = document.replace("_", "\\_")
@@ -250,26 +350,32 @@ def write_document(username: str, summaries):
         f.write(document)
 
 
-def construct_document(
-    due_date: datetime | None,
-    original_due_date: datetime,
-    extension: Extension | None,
-    entries,
-    total_under_development_duration: timedelta,
-    total_under_review_duration: timedelta,
-    out_of_slo_duration: timedelta,
-    late_by: timedelta | None,
-    adjusted_lateness: timedelta,
-    cumulative_adjusted_lateness: timedelta,
-    points_deducted: int | None,
-) -> str:
+Entry = tuple[str, PrState, timedelta | None]
+
+
+@dataclass
+class DocumentSpec:
+    due_date: datetime | None
+    original_due_date: datetime
+    extension: Extension | None
+    entries: list[Entry]
+    total_under_development_duration: timedelta
+    total_under_review_duration: timedelta
+    out_of_slo_duration: timedelta
+    late_by: timedelta | None
+    adjusted_lateness: timedelta
+    cumulative_adjusted_lateness: timedelta
+    points_deducted: int | None
+
+
+def construct_document(documentSpec: DocumentSpec) -> str:
     document = ""
-    if due_date:
+    if documentSpec.due_date:
         document += "approval due"
-        if due_date != original_due_date:
-            document += f" \\sout{{{original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
-        document += f" {due_date.strftime('%Y-%m-%d %H:%M:%S')}"
-        if extension:
+        if documentSpec.due_date != documentSpec.original_due_date:
+            document += f" \\sout{{{documentSpec.original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
+        document += f" {documentSpec.due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        if documentSpec.extension:
             document += " (extension granted)\\\\\n"
     document += textwrap.dedent("""
                                 \\setlength\\LTleft{0pt}
@@ -279,26 +385,22 @@ def construct_document(
                                 \\textbf{timestamp} & \\textbf{event} & \\textbf{status} \\\\
                                 \\midrule
                                 """).strip()
-    for event_summary, previous_state, elapsed_in_state in entries:
+    for event_summary, previous_state, elapsed_in_state in documentSpec.entries:
         if elapsed_in_state:
             document += f"{event_summary} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
         else:
             document += f"{event_summary} & \\\\\n"
     document += "\midrule\n"
-    document += f"&& under development for {pad_to(td_to_str(total_under_development_duration), 17)} \\\\\n"
-    document += f"&& under review for {pad_to(td_to_str(total_under_review_duration), 17)} \\\\\n"
-    document += (
-        f"&& reviews out of SLO for {pad_to(td_to_str(out_of_slo_duration), 17)} \\\\\n"
-    )
-    if late_by:
-        document += f"&& late by {pad_to(td_to_str(late_by), 17)} \\\\\n"
-    document += (
-        f"&& adjusted lateness: {pad_to(td_to_str(adjusted_lateness), 17)} \\\\\n"
-    )
+    document += f"&& under development for {pad_to(td_to_str(documentSpec.total_under_development_duration), 17)} \\\\\n"
+    document += f"&& under review for {pad_to(td_to_str(documentSpec.total_under_review_duration), 17)} \\\\\n"
+    document += f"&& reviews out of SLO for {pad_to(td_to_str(documentSpec.out_of_slo_duration), 17)} \\\\\n"
+    if documentSpec.late_by:
+        document += f"&& late by {pad_to(td_to_str(documentSpec.late_by), 17)} \\\\\n"
+    document += f"&& adjusted lateness: {pad_to(td_to_str(documentSpec.adjusted_lateness), 17)} \\\\\n"
     document += "\midrule\n"
-    document += f"&& cumulative adjusted lateness: {pad_to(td_to_str(cumulative_adjusted_lateness), 17)} \\\\\n"
-    if points_deducted is not None:
-        document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(points_deducted, 17)}}} \\\\\n"
+    document += f"&& cumulative adjusted lateness: {pad_to(td_to_str(documentSpec.cumulative_adjusted_lateness), 17)} \\\\\n"
+    if documentSpec.points_deducted is not None:
+        document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(documentSpec.points_deducted, 17)}}} \\\\\n"
     document += textwrap.dedent("""
                                 \\bottomrule
                                 \end{longtable}
@@ -440,12 +542,7 @@ class EhrProjectStatus:
             if state == PrState.APPROVED and approval is None:
                 approval = event.created_at
             entries.append((event.get_summary(), previous_state, elapsed_in_state))
-        if pr_state_machine.state == PrState.UNDER_DEVELOPMENT:
-            duration = now() - pr_state_machine.last_state_change_time
-            pr_state_machine.total_under_development_duration += duration
-        elif pr_state_machine.state == PrState.UNDER_REVIEW:
-            duration = now() - pr_state_machine.last_state_change_time
-            pr_state_machine.total_under_review_duration += duration
+        pr_state_machine.wrap_up()
         out_of_slo = pr_state_machine.out_of_slo_under_review_duration
         if due_date and pr_state_machine.finish_time:
             late_by = max(pr_state_machine.finish_time - due_date, timedelta(0))
@@ -462,19 +559,21 @@ class EhrProjectStatus:
             points_deducted = None
 
         document = construct_document(
-            due_date,
-            original_due_date,
-            extension,
-            entries,
-            pr_state_machine.total_under_development_duration,
-            pr_state_machine.total_under_review_duration,
-            out_of_slo,
-            late_by,
-            adjusted_lateness,
-            cumulative_adjusted_lateness,
-            points_deducted,
+            DocumentSpec(
+                due_date,
+                original_due_date,
+                extension,
+                entries,
+                pr_state_machine.total_under_development_duration,
+                pr_state_machine.total_under_review_duration,
+                out_of_slo,
+                late_by,
+                adjusted_lateness,
+                cumulative_adjusted_lateness,
+                points_deducted,
+            ),
         )
-        if pr_state_machine.finish_time:
+        if points_deducted is not None:
             with open("outputs/_summary.csv", "a") as f:
                 f.write(
                     f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
@@ -491,6 +590,7 @@ class EhrProjectStatus:
             and pr.number in self.phase_mapping_overrides[pr.owner]
         ):
             return self.phase_mapping_overrides[pr.owner][pr.number]
+        # abort if next_phase is already claimed by an override
         if pr.owner in self.phase_mapping_overrides and next_phase in [
             phase
             for phases in self.phase_mapping_overrides[pr.owner].values()
@@ -501,11 +601,11 @@ class EhrProjectStatus:
 
     def generate_pr_summaries(self: Self) -> None:
         """Generate PR summaries."""
-        prs = [pr for pr in self.list_prs(self.username) if pr.based_on_main]
+        prs = [pr for pr in self.list_prs() if pr.based_on_main]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > len(self.merge_due_dates):
-            raise ValueError("Too many PRs!")
+            raise ValueError("Too many open/merged PRs!")
         closed_pr_phases = [
             (pr, guess_phase(pr.title)) for idx, pr in enumerate(closed_prs)
         ]
@@ -545,84 +645,15 @@ class EhrProjectStatus:
 
         write_document(self.username, summaries)
 
-    def parse_pr(self, pr):
-        timeline_items = [edge["node"] for edge in pr["timelineItems"]["edges"]]
-        reviews_requested = [
-            ReviewRequested(
-                created_at=et_datetime(timeline_item["createdAt"]),
-                reviewer=timeline_item["requestedReviewer"]["login"],
-            )
-            for timeline_item in timeline_items
-            if timeline_item["__typename"] == "ReviewRequestedEvent"
-            and "login"
-            in timeline_item[
-                "requestedReviewer"
-            ]  # there is no "login" if the reviewer is Copilot
-        ]
-        reviews_dismissed = [
-            ReviewDismissed(
-                created_at=et_datetime(timeline_item["createdAt"]),
-                reviewer=timeline_item["review"]["author"]["login"],
-            )
-            for timeline_item in timeline_items
-            if timeline_item["__typename"] == "ReviewDismissedEvent"
-        ]
-        review_requests_removed = [
-            ReviewRequestRemoved(
-                created_at=et_datetime(timeline_item["createdAt"]),
-                reviewer=timeline_item["requestedReviewer"]["login"],
-            )
-            for timeline_item in timeline_items
-            if timeline_item["__typename"] == "ReviewRequestRemovedEvent"
-        ]
-        reviews = [
-            Review(
-                created_at=et_datetime(timeline_item["createdAt"]),
-                reviewer=timeline_item["author"]["login"],
-                state="APPROVED"
-                # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
-                if timeline_item["state"] == "DISMISSED"
-                else timeline_item["state"],
-            )
-            for timeline_item in timeline_items
-            if timeline_item["__typename"] == "PullRequestReview"
-            and timeline_item["author"]["login"]
-            in ("patrickkwang", "hu-i-oop", "JasonMa-778")
-        ]
-        merges = [
-            Merge(
-                created_at=et_datetime(timeline_item["createdAt"]),
-            )
-            for timeline_item in timeline_items
-            if timeline_item["__typename"] == "MergedEvent"
-        ]
-        closes = [
-            ClosedEvent(
-                created_at=et_datetime(timeline_item["createdAt"]),
-            )
-            for timeline_item in timeline_items
-            if timeline_item["__typename"] == "ClosedEvent"
-        ]
-
-        return sorted(
-            reviews_requested
-            + reviews
-            + review_requests_removed
-            + reviews_dismissed
-            + merges
-            + closes,
-            key=lambda event: event.created_at,
-        )
-
-    def list_prs(self: Self, username: str) -> list[PullRequest]:
-        """Get data for non-closed PRs."""
+    def list_prs(self: Self) -> list[PullRequest]:
+        """Get data for PRs."""
         response = httpx.post(
             "https://api.github.com/graphql",
             headers=self.headers,
             json={
                 "query": f"""
                 {{
-                    repository(owner: "{self.organization}", name: "{self.repo_name(username)}") {{
+                    repository(owner: "{self.organization}", name: "{self.repo_name(self.username)}") {{
                         defaultBranchRef {{
                             target {{
                                 ... on Commit {{
@@ -710,49 +741,18 @@ class EhrProjectStatus:
                 """
             },
         )
+        if response.json()["data"]["repository"] is None:
+            return []
         main_id = response.json()["data"]["repository"]["defaultBranchRef"]["target"][
             "id"
-        ]
-        prs = [
-            edge["node"]
-            for edge in response.json()["data"]["repository"]["pullRequests"]["edges"]
-        ]
-        prs = [
-            {
-                "created_at": et_datetime(pr["createdAt"]),
-                "number": pr["number"],
-                "state": pr["state"],
-                "title": pr["title"],
-                "permalink": pr["permalink"],
-                # it seems like baseRef can be None if the base branch has been deleted
-                "base_id": pr["baseRef"]["target"]["id"] if pr["baseRef"] else None,
-                "branch": pr["headRefName"],
-                "commit_ids": [
-                    node["id"]
-                    for node in pr["commits"]["nodes"][0]["commit"]["history"]["nodes"]
-                ]
-                if pr["commits"]["nodes"]  # there may be no commits
-                else [],
-                "timeline_events": self.parse_pr(pr),
-            }
-            for pr in prs
         ]
 
         return sorted(
             [
-                PullRequest(
-                    username,
-                    pr["branch"],
-                    pr["created_at"],
-                    pr["title"],
-                    pr["permalink"],
-                    pr["number"],
-                    pr["state"],
-                    based_on_main=pr["base_id"] == main_id,
-                    behind_base=pr["base_id"] not in pr["commit_ids"],
-                    timeline_events=pr["timeline_events"],
-                )
-                for pr in prs
+                PullRequest.from_dict(edge["node"], self.username, main_id)
+                for edge in response.json()["data"]["repository"]["pullRequests"][
+                    "edges"
+                ]
             ],
             key=lambda pr: pr.created_at,
         )
@@ -766,6 +766,10 @@ if __name__ == "__main__":
     parser.add_argument("username")
     parser.add_argument("name")
     args = parser.parse_args()
-    EhrProjectStatus(
-        "biostat821-2025", args.username.strip(), args.name.strip()
-    ).generate_pr_summaries()
+    print(args)
+    try:
+        EhrProjectStatus(
+            "biostat821-2026", args.username.strip(), args.name.strip()
+        ).generate_pr_summaries()
+    except Exception as e:
+        print(f"Failed to generate PR summaries. {e}")
