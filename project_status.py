@@ -4,7 +4,6 @@
 import argparse
 import csv
 import math
-import os
 import re
 import textwrap
 from collections import defaultdict
@@ -174,10 +173,15 @@ def write_document(username: str, summaries):
 
 
 @dataclass
-class DocumentSpec:
-    due_date: datetime | None
+class DueDate:
+    due_date: datetime
     original_due_date: datetime
     extension: Extension | None
+
+
+@dataclass
+class DocumentSpec:
+    due_date: DueDate | None
     entries: list[Entry]
     total_under_development_duration: timedelta
     total_under_review_duration: timedelta
@@ -192,10 +196,10 @@ def construct_document(documentSpec: DocumentSpec) -> str:
     document = ""
     if documentSpec.due_date:
         document += "approval due"
-        if documentSpec.due_date != documentSpec.original_due_date:
-            document += f" \\sout{{{documentSpec.original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
-        document += f" {documentSpec.due_date.strftime('%Y-%m-%d %H:%M:%S')}"
-        if documentSpec.extension:
+        if documentSpec.due_date.due_date != documentSpec.due_date.original_due_date:
+            document += f" \\sout{{{documentSpec.due_date.original_due_date.strftime('%Y-%m-%d %H:%M:%S')}}}"
+        document += f" {documentSpec.due_date.due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        if documentSpec.due_date.extension:
             document += " (extension granted)\\\\\n"
     document += textwrap.dedent("""
                                 \\setlength\\LTleft{0pt}
@@ -205,7 +209,10 @@ def construct_document(documentSpec: DocumentSpec) -> str:
                                 \\textbf{timestamp} & \\textbf{event} & \\textbf{status} \\\\
                                 \\midrule
                                 """).strip()
-    for event_summary, previous_state, elapsed_in_state in documentSpec.entries:
+    for entry in documentSpec.entries:
+        event_summary = entry.summary
+        previous_state = entry.previous_state
+        elapsed_in_state = entry.elapsed_in_state
         if elapsed_in_state:
             document += f"{event_summary} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
         else:
@@ -271,25 +278,25 @@ class EhrProjectStatus:
         pr: PullRequest,
         phase: int | None = None,
         last_approval: datetime | None = None,
-    ) -> tuple[datetime | None, datetime, Extension | None]:
+    ) -> DueDate | None:
         """Get due date for PR."""
         assert phase in PHASES
-        due_date = None
-        if phase is not None:
-            extension = self.extensions.get((pr.owner, phase))
-            rolling_due_date = (
-                last_approval + self.phase_durations[phase]
-                if last_approval
-                else self.first_due_date
-            )
-            original_due_date = self.merge_due_dates[phase - 1]
-            scheduled_due_date = extension.due_date if extension else original_due_date
-            due_date = (
-                min(max(rolling_due_date, scheduled_due_date), self.final_due_date)
-                if rolling_due_date
-                else scheduled_due_date
-            )
-        return due_date, original_due_date, extension
+        if phase is None:
+            return None
+        extension = self.extensions.get((pr.owner, phase))
+        rolling_due_date = (
+            last_approval + self.phase_durations[phase]
+            if last_approval
+            else self.first_due_date
+        )
+        original_due_date = self.merge_due_dates[phase - 1]
+        scheduled_due_date = extension.due_date if extension else original_due_date
+        due_date = (
+            min(max(rolling_due_date, scheduled_due_date), self.final_due_date)
+            if rolling_due_date
+            else scheduled_due_date
+        )
+        return DueDate(due_date, original_due_date, extension)
 
     def _generate_pr_summary(
         self,
@@ -299,9 +306,7 @@ class EhrProjectStatus:
         prior_adjusted_lateness: timedelta = timedelta(0),
     ) -> tuple[str, datetime | None, timedelta]:
         """Generate PR summary."""
-        due_date, original_due_date, extension = self._get_due_date(
-            pr, phase, last_approval
-        )
+        due_date = self._get_due_date(pr, phase, last_approval)
         all_events = sorted(
             [Created(pr.created_at)]
             + pr.timeline_events
@@ -312,7 +317,9 @@ class EhrProjectStatus:
         entries, approval = pr_state_machine.process_events(all_events)
         out_of_slo = pr_state_machine.out_of_slo_under_review_duration
         if due_date and pr_state_machine.finish_time:
-            late_by = max(pr_state_machine.finish_time - due_date, timedelta(0))
+            late_by = max(
+                pr_state_machine.finish_time - due_date.due_date, timedelta(0)
+            )
             adjusted_lateness = max(late_by - out_of_slo, timedelta(0))
         else:
             late_by = None
@@ -328,8 +335,6 @@ class EhrProjectStatus:
         document = construct_document(
             DocumentSpec(
                 due_date,
-                original_due_date,
-                extension,
                 entries,
                 pr_state_machine.total_under_development_duration,
                 pr_state_machine.total_under_review_duration,

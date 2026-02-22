@@ -1,6 +1,7 @@
 """Model PR state transitions."""
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Self
@@ -44,7 +45,11 @@ class PrState(Enum):
     CLOSED = "closed"
 
 
-Entry = tuple[str, PrState, timedelta | None]
+@dataclass
+class Entry:
+    summary: str
+    previous_state: PrState
+    elapsed_in_state: timedelta | None
 
 
 class PrStateMachine:
@@ -202,6 +207,6 @@ class PrStateMachine:
             )
             if state == PrState.APPROVED and approval is None:
                 approval = event.created_at
-            entries.append((event.get_summary(), previous_state, elapsed_in_state))
+            entries.append(Entry(event.get_summary(), previous_state, elapsed_in_state))
         self.wrap_up()
         return entries, approval
