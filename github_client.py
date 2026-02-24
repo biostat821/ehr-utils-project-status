@@ -311,7 +311,7 @@ class GithubClient:
                 },
             )
             if response.json()["data"]["repository"] is None:
-                return []
+                return {}
             main_id = response.json()["data"]["repository"]["defaultBranchRef"][
                 "target"
             ]["id"]
