@@ -7,17 +7,7 @@ from enum import Enum
 from typing import Self
 from zoneinfo import ZoneInfo
 
-from github_client import (
-    ClosedEvent,
-    Event,
-    Merge,
-    PreviousPhaseApproved,
-    Approved,
-    ChangesRequested,
-    ReviewDismissed,
-    ReviewRequested,
-    ReviewRequestRemoved,
-)
+from github_client import Event
 
 
 def now() -> datetime:
@@ -94,9 +84,9 @@ class PrStateMachine:
 
     def _update_pr_state(self, event: Event) -> timedelta | None:
         """Update the state in response to a new event."""
-        if isinstance(event, Merge):
+        if event.type == "MERGED":
             new_state = PrState.MERGED
-        elif isinstance(event, ClosedEvent):
+        elif event.type == "CLOSED":
             if self.state == PrState.MERGED:
                 new_state = PrState.MERGED
             else:
@@ -105,7 +95,7 @@ class PrStateMachine:
             not self.reviewer_states["patrickkwang"] == ReviewerState.APPROVED
             and self.state == PrState.WAITING
         ):
-            if isinstance(event, PreviousPhaseApproved):
+            if event.type == "PREVIOUS_PHASE_APPROVED":
                 new_state = PrState.UNDER_DEVELOPMENT
             else:
                 new_state = PrState.WAITING
@@ -151,7 +141,7 @@ class PrStateMachine:
 
     def _update_reviewer_states(self: Self, event: Event):
         """Update reviewer states based on event."""
-        if isinstance(event, (ReviewRequested, ReviewDismissed)):
+        if event.type in ("REVIEW_REQUESTED", "REVIEW_DISMISSED"):
             if self.reviewer_states[event.reviewer] != ReviewerState.APPROVED:
                 self.reviewer_states[event.reviewer] = ReviewerState.REVIEW_REQUESTED
             else:
@@ -159,11 +149,11 @@ class PrStateMachine:
                     ReviewerState.REVIEW_REQUESTED_POST_APPROVAL
                 )
             self.last_review_requested = event.created_at
-        elif isinstance(event, ReviewRequestRemoved):
+        elif event.type == "REVIEW_REQUEST_REMOVED":
             del self.reviewer_states[event.reviewer]
-        elif isinstance(event, ChangesRequested):
+        elif event.type == "CHANGES_REQUESTED":
             self.reviewer_states[event.reviewer] = ReviewerState.REQUESTED_CHANGES
-        elif isinstance(event, Approved):
+        elif event.type == "APPROVED":
             self.reviewer_states[event.reviewer] = ReviewerState.APPROVED
         # ignore Commented
 

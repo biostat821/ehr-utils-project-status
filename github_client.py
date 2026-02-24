@@ -17,9 +17,11 @@ def et_datetime(iso: str) -> datetime:
 @dataclass
 class Event:
     created_at: datetime
+    type: str
+    reviewer: str | None = None
 
     def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & {type(self).__name__:20s}"
+        return f"{self.creation_time} & {self.type}{f' from {self.reviewer}' if self.reviewer else ''}"
 
     @property
     def creation_time(self: Self) -> str:
@@ -67,94 +69,25 @@ class PullRequest:
         )
 
 
-@dataclass
-class Created(Event):
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & CREATED"
-
-
-@dataclass
-class PreviousPhaseApproved(Event):
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & PREVIOUS_PHASE_APPROVED"
-
-
-@dataclass
-class ReviewRequested(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEW_REQUESTED from {self.reviewer}"
-
-
-@dataclass
-class ReviewRequestRemoved(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEW_REQUEST_REMOVED from {self.reviewer}"
-
-
-@dataclass
-class ReviewDismissed(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEW_DISMISSED from {self.reviewer}"
-
-
-@dataclass
-class Approved(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEWED (approved) by {self.reviewer}"
-
-
-@dataclass
-class ChangesRequested(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEWED (changes requested) by {self.reviewer}"
-
-
-@dataclass
-class Commented(Event):
-    reviewer: str
-
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & REVIEWED (commented) by {self.reviewer}"
-
-
-@dataclass
-class Merge(Event):
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & MERGED"
-
-
-@dataclass
-class ClosedEvent(Event):
-    def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.creation_time} & CLOSED"
-
-
 def get_event(timeline_item) -> Event:
     # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
     if timeline_item["state"] in ("APPROVED", "DISMISSED"):
-        return Approved(
+        return Event(
             created_at=et_datetime(timeline_item["createdAt"]),
             reviewer=timeline_item["author"]["login"],
+            type="APPROVED",
         )
     if timeline_item["state"] == ("CHANGES_REQUESTED"):
-        return ChangesRequested(
+        return Event(
             created_at=et_datetime(timeline_item["createdAt"]),
             reviewer=timeline_item["author"]["login"],
+            type="CHANGES_REQUESTED",
         )
     if timeline_item["state"] == ("COMMENTED"):
-        return Commented(
+        return Event(
             created_at=et_datetime(timeline_item["createdAt"]),
             reviewer=timeline_item["author"]["login"],
+            type="COMMENTED",
         )
     raise ValueError(f"Unrecognized review type {timeline_item}")
 
@@ -162,9 +95,10 @@ def get_event(timeline_item) -> Event:
 def parse_events(pr) -> list[Event]:
     timeline_items = [edge["node"] for edge in pr["timelineItems"]["edges"]]
     reviews_requested = [
-        ReviewRequested(
+        Event(
             created_at=et_datetime(timeline_item["createdAt"]),
             reviewer=timeline_item["requestedReviewer"]["login"],
+            type="REVIEW_REQUESTED",
         )
         for timeline_item in timeline_items
         if timeline_item["__typename"] == "ReviewRequestedEvent"
@@ -174,17 +108,19 @@ def parse_events(pr) -> list[Event]:
         ]  # there is no "login" if the reviewer is Copilot
     ]
     reviews_dismissed = [
-        ReviewDismissed(
+        Event(
             created_at=et_datetime(timeline_item["createdAt"]),
             reviewer=timeline_item["review"]["author"]["login"],
+            type="REVIEW_DISMISSED",
         )
         for timeline_item in timeline_items
         if timeline_item["__typename"] == "ReviewDismissedEvent"
     ]
     review_requests_removed = [
-        ReviewRequestRemoved(
+        Event(
             created_at=et_datetime(timeline_item["createdAt"]),
             reviewer=timeline_item["requestedReviewer"]["login"],
+            type="REVIEW_REQUEST_REMOVED",
         )
         for timeline_item in timeline_items
         if timeline_item["__typename"] == "ReviewRequestRemovedEvent"
@@ -197,16 +133,12 @@ def parse_events(pr) -> list[Event]:
         in ("patrickkwang", "Surgulaze99", "skylershapiro")
     ]
     merges = [
-        Merge(
-            created_at=et_datetime(timeline_item["createdAt"]),
-        )
+        Event(created_at=et_datetime(timeline_item["createdAt"]), type="MERGED")
         for timeline_item in timeline_items
         if timeline_item["__typename"] == "MergedEvent"
     ]
     closes = [
-        ClosedEvent(
-            created_at=et_datetime(timeline_item["createdAt"]),
-        )
+        Event(created_at=et_datetime(timeline_item["createdAt"]), type="CLOSED")
         for timeline_item in timeline_items
         if timeline_item["__typename"] == "ClosedEvent"
     ]

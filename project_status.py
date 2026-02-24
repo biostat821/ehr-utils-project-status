@@ -14,9 +14,8 @@ from typing import Self
 from zoneinfo import ZoneInfo
 
 from github_client import (
-    Created,
+    Event,
     GithubClient,
-    PreviousPhaseApproved,
     PullRequest,
 )
 from pr_state_machine import Entry, PrStateMachine, PrState
@@ -253,9 +252,13 @@ class EhrProjectStatus:
         """Generate PR summary."""
         phase_start_time = last_approval if last_approval else self.start_time
         all_events = sorted(
-            [Created(pr.created_at)]
+            [Event(pr.created_at, type="CREATED")]
             + pr.timeline_events
-            + ([PreviousPhaseApproved(last_approval)] if last_approval else []),
+            + (
+                [Event(last_approval, type="PREVIOUS_PHASE_APPROVED")]
+                if last_approval
+                else []
+            ),
             key=lambda event: event.created_at,
         )
         pr_state_machine = PrStateMachine(
