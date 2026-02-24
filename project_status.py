@@ -222,7 +222,12 @@ def _construct_pr_report(documentSpec: DocumentSpec) -> str:
 class EhrProjectStatus:
     """Multitool for managing EHR projects on GitHub."""
 
-    def __init__(self: Self, organization: str, username: str, name: str):
+    def __init__(
+        self: Self,
+        username: str,
+        name: str,
+        prs: dict[str, list[PullRequest]],
+    ):
         """Initialize."""
         self.username = username
         self.name = name
@@ -233,7 +238,7 @@ class EhrProjectStatus:
         self.phase_mapping_overrides = get_phase_mapping_overrides(
             "phase_mapping_overrides.csv"
         )
-        self.github_client = GithubClient(organization)
+        self.prs = prs
 
     start_time = datetime(2026, 2, 13, 23, 59, 59, tzinfo=ZoneInfo("America/New_York"))
     phase_time_budget = timedelta(days=7)
@@ -311,11 +316,7 @@ class EhrProjectStatus:
         return [next_phase]
 
     def _get_phase_prs(self: Self) -> dict[int, list[PullRequest]]:
-        prs = [
-            pr
-            for pr in self.github_client.list_prs([self.username])[self.username]
-            if pr.based_on_main
-        ]
+        prs = [pr for pr in self.prs[self.username] if pr.based_on_main]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > NUM_PHASES:
@@ -368,13 +369,20 @@ if __name__ == "__main__":
         prog="ProjectStatus",
         description="Generates project status reports",
     )
-    parser.add_argument("username")
-    parser.add_argument("name")
+    parser.add_argument("filename")
     args = parser.parse_args()
-    print(args)
     try:
-        EhrProjectStatus(
-            "biostat821-2026", args.username.strip(), args.name.strip()
-        ).generate_project_report()
+        with open(args.filename) as f:
+            csvreader = csv.DictReader(f)
+            students = list(csvreader)
+
+        organization = "biostat821-2026"
+        github_client = GithubClient(organization)
+        prs = github_client.list_prs([student["username"] for student in students])
+
+        for student in students:
+            EhrProjectStatus(
+                student["username"], student["name"], prs
+            ).generate_project_report()
     except Exception as e:
         print(f"Failed to generate PR summaries. {e}")

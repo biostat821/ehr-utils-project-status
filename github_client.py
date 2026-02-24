@@ -215,91 +215,88 @@ class GithubClient:
     def list_prs(self: Self, usernames: list[str]) -> dict[str, list[PullRequest]]:
         """Get data for PRs."""
         results = dict()
-        for username in usernames:
-            response = httpx.post(
-                "https://api.github.com/graphql",
-                headers=self.headers,
-                json={
-                    "query": f"""
-                    {{
-                        repo0: repository(owner: "{self.organization}", name: "{self.get_repo_name(username)}") {{
-                            defaultBranchRef {{
-                                target {{
-                                    ... on Commit {{
-                                        id
+        repo_pieces = ""
+        repos_by_username = dict()
+        for idx, username in enumerate(usernames):
+            repo_name = f"repo{idx:03d}"
+            repos_by_username[username] = repo_name
+            repo_pieces += f"""
+                {repo_name}: repository(owner: "{self.organization}", name: "{self.get_repo_name(username)}") {{
+                    defaultBranchRef {{
+                        target {{
+                            ... on Commit {{
+                                id
+                            }}
+                        }}
+                    }}
+                    pullRequests(first: 100, states:[CLOSED, OPEN, MERGED]) {{
+                        edges {{
+                            node {{
+                                createdAt
+                                number
+                                state
+                                permalink
+                                title
+                                baseRef {{
+                                    target {{
+                                        ... on Commit {{
+                                            id
+                                        }}
                                     }}
                                 }}
-                            }}
-                            pullRequests(first: 100, states:[CLOSED, OPEN, MERGED]) {{
-                                edges {{
-                                    node {{
-                                        createdAt
-                                        number
-                                        state
-                                        permalink
-                                        title
-                                        baseRef {{
-                                            target {{
-                                                ... on Commit {{
+                                headRefName
+                                commits(first: 1) {{
+                                    nodes {{
+                                        commit {{
+                                            history(first: 100) {{
+                                                nodes {{
                                                     id
                                                 }}
                                             }}
                                         }}
-                                        headRefName
-                                        commits(first: 1) {{
-                                            nodes {{
-                                                commit {{
-                                                    history(first: 100) {{
-                                                        nodes {{
-                                                            id
-                                                        }}
-                                                    }}
+                                    }}
+                                }}
+                                timelineItems(last: 100) {{
+                                    edges {{
+                                        node {{
+                                            __typename
+                                            ... on PullRequestReview {{
+                                                createdAt
+                                                author {{
+                                                    login
+                                                }}
+                                                body
+                                                state
+                                            }}
+                                            ... on ReviewRequestedEvent {{
+                                                createdAt
+                                                requestedReviewer {{
+                                                ... on User {{
+                                                    login
+                                                }}
                                                 }}
                                             }}
-                                        }}
-                                        timelineItems(last: 100) {{
-                                            edges {{
-                                                node {{
-                                                    __typename
-                                                    ... on PullRequestReview {{
-                                                        createdAt
-                                                        author {{
-                                                            login
-                                                        }}
-                                                        body
-                                                        state
-                                                    }}
-                                                    ... on ReviewRequestedEvent {{
-                                                        createdAt
-                                                        requestedReviewer {{
-                                                        ... on User {{
-                                                            login
-                                                        }}
-                                                        }}
-                                                    }}
-                                                    ... on ReviewRequestRemovedEvent {{
-                                                        createdAt
-                                                        requestedReviewer {{
-                                                        ... on User {{
-                                                            login
-                                                        }}
-                                                        }}
-                                                    }}
-                                                    ... on ReviewDismissedEvent {{
-                                                        createdAt
-                                                        review {{
-                                                        author {{
-                                                            login
-                                                        }}
-                                                        }}
-                                                    }}
-                                                    ... on MergedEvent {{
-                                                        createdAt
-                                                    }}
-                                                    ... on ClosedEvent {{
-                                                        createdAt
-                                                    }}
+                                            ... on ReviewRequestRemovedEvent {{
+                                                createdAt
+                                                requestedReviewer {{
+                                                ... on User {{
+                                                    login
                                                 }}
+                                                }}
+                                            }}
+                                            ... on ReviewDismissedEvent {{
+                                                createdAt
+                                                review {{
+                                                author {{
+                                                    login
+                                                }}
+                                                }}
+                                            }}
+                                            ... on MergedEvent {{
+                                                createdAt
+                                            }}
+                                            ... on ClosedEvent {{
+                                                createdAt
                                             }}
                                         }}
                                     }}
@@ -307,17 +304,26 @@ class GithubClient:
                             }}
                         }}
                     }}
-                    """
-                },
-            )
-            repo0_data = response.json()["data"]["repo0"]
-            if repo0_data is None:
+                }}
+            """
+        response = httpx.post(
+            "https://api.github.com/graphql",
+            headers=self.headers,
+            json={
+                "query": f"""
+                {{{repo_pieces}}}
+                """
+            },
+        )
+        for username, repo_name in repos_by_username.items():
+            repo_data = response.json()["data"][repo_name]
+            if repo_data is None:
                 return {}
-            main_id = repo0_data["defaultBranchRef"]["target"]["id"]
+            main_id = repo_data["defaultBranchRef"]["target"]["id"]
             results[username] = sorted(
                 [
                     PullRequest.from_dict(edge["node"], username, main_id)
-                    for edge in repo0_data["pullRequests"]["edges"]
+                    for edge in repo_data["pullRequests"]["edges"]
                 ],
                 key=lambda pr: pr.created_at,
             )
