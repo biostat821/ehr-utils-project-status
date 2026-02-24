@@ -233,7 +233,7 @@ class EhrProjectStatus:
         self.phase_mapping_overrides = get_phase_mapping_overrides(
             "phase_mapping_overrides.csv"
         )
-        self.github_client = GithubClient(organization, username, name)
+        self.github_client = GithubClient(organization, username)
 
     start_time = datetime(2026, 2, 13, 23, 59, 59, tzinfo=ZoneInfo("America/New_York"))
     phase_time_budget = timedelta(days=7)

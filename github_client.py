@@ -199,11 +199,10 @@ def parse_events(pr) -> list[Event]:
 class GithubClient:
     """Client for interacting with the GitHub API."""
 
-    def __init__(self: Self, organization: str, username: str, name: str):
+    def __init__(self: Self, organization: str, username: str):
         """Initialize."""
         self.organization = organization
         self.username = username
-        self.name = name
         self.auth_token = os.getenv("GITHUB_TOKEN")
         self.headers = {
             "Accept": "application/vnd.github+json",
