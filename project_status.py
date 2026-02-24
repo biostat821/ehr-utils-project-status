@@ -233,7 +233,7 @@ class EhrProjectStatus:
         self.phase_mapping_overrides = get_phase_mapping_overrides(
             "phase_mapping_overrides.csv"
         )
-        self.github_client = GithubClient(organization, username)
+        self.github_client = GithubClient(organization)
 
     start_time = datetime(2026, 2, 13, 23, 59, 59, tzinfo=ZoneInfo("America/New_York"))
     phase_time_budget = timedelta(days=7)
@@ -311,7 +311,11 @@ class EhrProjectStatus:
         return [next_phase]
 
     def _get_phase_prs(self: Self) -> dict[int, list[PullRequest]]:
-        prs = [pr for pr in self.github_client.list_prs() if pr.based_on_main]
+        prs = [
+            pr
+            for pr in self.github_client.list_prs([self.username])[self.username]
+            if pr.based_on_main
+        ]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > NUM_PHASES:
