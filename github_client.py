@@ -168,7 +168,7 @@ def parse_events(pr) -> list[Event]:
         for timeline_item in timeline_items
         if timeline_item["__typename"] == "PullRequestReview"
         and timeline_item["author"]["login"]
-        in ("patrickkwang", "hu-i-oop", "JasonMa-778")
+        in ("patrickkwang", "Surgulaze99", "skylershapiro")
     ]
     merges = [
         Merge(
