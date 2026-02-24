@@ -9,7 +9,6 @@ import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from itertools import accumulate
 from typing import Self
 from zoneinfo import ZoneInfo
 
