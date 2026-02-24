@@ -12,7 +12,8 @@ from github_client import (
     Event,
     Merge,
     PreviousPhaseApproved,
-    Review,
+    Approved,
+    ChangesRequested,
     ReviewDismissed,
     ReviewRequested,
     ReviewRequestRemoved,
@@ -160,16 +161,11 @@ class PrStateMachine:
             self.last_review_requested = event.created_at
         elif isinstance(event, ReviewRequestRemoved):
             del self.reviewer_states[event.reviewer]
-        elif isinstance(event, Review) and event.state == "CHANGES_REQUESTED":
+        elif isinstance(event, ChangesRequested):
             self.reviewer_states[event.reviewer] = ReviewerState.REQUESTED_CHANGES
-        elif isinstance(event, Review) and event.state == "DISMISSED":
-            self.reviewer_states[event.reviewer] = ReviewerState.REVIEW_REQUESTED
-        elif isinstance(event, Review) and (
-            event.state == "APPROVED"
-            or (event.state == "COMMENTED" and event.reviewer != "patrickkwang")
-        ):
-            # Both APPROVED and COMMENTED are considered approval.
+        elif isinstance(event, Approved):
             self.reviewer_states[event.reviewer] = ReviewerState.APPROVED
+        # ignore Commented
 
     def process_events(
         self: Self, events: list[Event]

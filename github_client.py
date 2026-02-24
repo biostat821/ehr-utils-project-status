@@ -104,14 +104,27 @@ class ReviewDismissed(Event):
 
 
 @dataclass
-class Review(Event):
+class Approved(Event):
     reviewer: str
-    state: str
 
     def get_summary(self: Self, verbose: bool = False) -> str:
-        return (
-            f"{self.creation_time} & REVIEWED ({self.state.lower()}) by {self.reviewer}"
-        )
+        return f"{self.creation_time} & REVIEWED (approved) by {self.reviewer}"
+
+
+@dataclass
+class ChangesRequested(Event):
+    reviewer: str
+
+    def get_summary(self: Self, verbose: bool = False) -> str:
+        return f"{self.creation_time} & REVIEWED (changes requested) by {self.reviewer}"
+
+
+@dataclass
+class Commented(Event):
+    reviewer: str
+
+    def get_summary(self: Self, verbose: bool = False) -> str:
+        return f"{self.creation_time} & REVIEWED (commented) by {self.reviewer}"
 
 
 @dataclass
@@ -124,6 +137,26 @@ class Merge(Event):
 class ClosedEvent(Event):
     def get_summary(self: Self, verbose: bool = False) -> str:
         return f"{self.creation_time} & CLOSED"
+
+
+def get_event(timeline_item) -> Event:
+    # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
+    if timeline_item["state"] in ("APPROVED", "DISMISSED"):
+        return Approved(
+            created_at=et_datetime(timeline_item["createdAt"]),
+            reviewer=timeline_item["author"]["login"],
+        )
+    if timeline_item["state"] == ("CHANGES_REQUESTED"):
+        return ChangesRequested(
+            created_at=et_datetime(timeline_item["createdAt"]),
+            reviewer=timeline_item["author"]["login"],
+        )
+    if timeline_item["state"] == ("COMMENTED"):
+        return Commented(
+            created_at=et_datetime(timeline_item["createdAt"]),
+            reviewer=timeline_item["author"]["login"],
+        )
+    raise ValueError(f"Unrecognized review type {timeline_item}")
 
 
 def parse_events(pr) -> list[Event]:
@@ -157,14 +190,7 @@ def parse_events(pr) -> list[Event]:
         if timeline_item["__typename"] == "ReviewRequestRemovedEvent"
     ]
     reviews = [
-        Review(
-            created_at=et_datetime(timeline_item["createdAt"]),
-            reviewer=timeline_item["author"]["login"],
-            # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
-            state="APPROVED"
-            if timeline_item["state"] == "DISMISSED"
-            else timeline_item["state"],
-        )
+        get_event(timeline_item)
         for timeline_item in timeline_items
         if timeline_item["__typename"] == "PullRequestReview"
         and timeline_item["author"]["login"]
