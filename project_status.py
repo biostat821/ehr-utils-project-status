@@ -6,6 +6,7 @@ import csv
 import math
 import re
 import textwrap
+import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -371,18 +372,24 @@ if __name__ == "__main__":
     )
     parser.add_argument("filename")
     args = parser.parse_args()
-    try:
-        with open(args.filename) as f:
-            csvreader = csv.DictReader(f)
-            students = list(csvreader)
+    with open(args.filename) as f:
+        csvreader = csv.DictReader(f)
+        students = list(csvreader)
 
-        organization = "biostat821-2026"
+    organization = "biostat821-2026"
+
+    try:
         github_client = GithubClient(organization)
         prs = github_client.list_prs([student["username"] for student in students])
+    except Exception:
+        print("Failed to get PR data:")
+        traceback.print_exc()
 
+    try:
         for student in students:
             EhrProjectStatus(
                 student["username"], student["name"], prs
             ).generate_project_report()
-    except Exception as e:
-        print(f"Failed to generate PR summaries. {e}")
+    except Exception:
+        print("Failed to generate PR reports:")
+        traceback.print_exc()
