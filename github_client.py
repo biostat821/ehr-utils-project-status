@@ -222,7 +222,7 @@ class GithubClient:
                 json={
                     "query": f"""
                     {{
-                        repository(owner: "{self.organization}", name: "{self.get_repo_name(username)}") {{
+                        repo0: repository(owner: "{self.organization}", name: "{self.get_repo_name(username)}") {{
                             defaultBranchRef {{
                                 target {{
                                     ... on Commit {{
@@ -310,17 +310,14 @@ class GithubClient:
                     """
                 },
             )
-            if response.json()["data"]["repository"] is None:
+            repo0_data = response.json()["data"]["repo0"]
+            if repo0_data is None:
                 return {}
-            main_id = response.json()["data"]["repository"]["defaultBranchRef"][
-                "target"
-            ]["id"]
+            main_id = repo0_data["defaultBranchRef"]["target"]["id"]
             results[username] = sorted(
                 [
                     PullRequest.from_dict(edge["node"], username, main_id)
-                    for edge in response.json()["data"]["repository"]["pullRequests"][
-                        "edges"
-                    ]
+                    for edge in repo0_data["pullRequests"]["edges"]
                 ],
                 key=lambda pr: pr.created_at,
             )
