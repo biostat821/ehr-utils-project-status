@@ -124,6 +124,10 @@ def parse_events(pr) -> list[Event]:
         )
         for timeline_item in timeline_items
         if timeline_item["__typename"] == "ReviewRequestRemovedEvent"
+        and "login"
+        in timeline_item[
+            "requestedReviewer"
+        ]  # there is no "login" if the reviewer is Copilot
     ]
     reviews = [
         get_event(timeline_item)
