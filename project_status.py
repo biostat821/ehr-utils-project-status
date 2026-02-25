@@ -289,14 +289,14 @@ class EhrProjectStatus:
                     f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
                 )
         with open("outputs/_state_summary.csv", "a") as f:
-            waiting_for = None
+            waiting_for = timedelta(0)
             if (
                 pr_state_machine.last_review_requested
                 and pr_state_machine.state == PrState.UNDER_REVIEW
             ):
                 waiting_for = now() - pr_state_machine.last_review_requested
             f.write(
-                f'"{self.name}",{self.username},{phase},{pr.permalink},{pr_state_machine.state},{late_by},{waiting_for}\n'
+                f'"{self.name}",{self.username},{phase},{pr.permalink},"{pr_state_machine.state.value}","{td_to_str(late_by)}",{waiting_for}\n'
             )
         return pr_report, approval, late_by
 
