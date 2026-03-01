@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+import json
 import math
 import re
 import textwrap
@@ -62,9 +63,9 @@ def pad_to(x, n: int) -> str:
     x_str = str(x)
     padding = n - len(x_str)
     if padding >= 3:
-        return "." * (padding - 1) + "\ " + x_str
+        return "." * (padding - 1) + r"\ " + x_str
     else:
-        return "\ " * padding + x_str
+        return r"\ " * padding + x_str
 
 
 def td_to_str(td: timedelta) -> str:
@@ -205,7 +206,7 @@ def _construct_pr_report(documentSpec: DocumentSpec) -> str:
             document += f"{event_summary} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
         else:
             document += f"{event_summary} & \\\\\n"
-    document += "\midrule\n"
+    document += "\\midrule\n"
     document += f"&& under development for {pad_to(td_to_str(documentSpec.total_under_development_duration), 17)} \\\\\n"
     document += f"&& under review for {pad_to(td_to_str(documentSpec.total_under_review_duration), 17)} \\\\\n"
     if documentSpec.late_by:
@@ -214,7 +215,7 @@ def _construct_pr_report(documentSpec: DocumentSpec) -> str:
         document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(documentSpec.points_deducted, 17)}}} \\\\\n"
     document += textwrap.dedent("""
                                 \\bottomrule
-                                \end{longtable}
+                                \\end{longtable}
                                 """).strip()
     return document
 
@@ -368,6 +369,21 @@ class EhrProjectStatus:
         write_document(self.username, pr_reports)
 
 
+def get_data(students) -> str:
+    github_client = GithubClient(organization)
+    prs = github_client.list_prs([student["username"] for student in students])
+    pr_filename = (
+        f"pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
+    )
+    with open(pr_filename, "w") as f:
+        json.dump(
+            {username: [pr.to_dict() for pr in prs] for username, prs in prs.items()},
+            f,
+            indent=4,
+        )
+    return pr_filename
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="ProjectStatus",
@@ -381,12 +397,14 @@ if __name__ == "__main__":
 
     organization = "biostat821-2026"
 
-    try:
-        github_client = GithubClient(organization)
-        prs = github_client.list_prs([student["username"] for student in students])
-    except Exception:
-        print("Failed to get PR data:")
-        traceback.print_exc()
+    pr_filename = get_data(students)
+
+    with open(pr_filename) as f:
+        pr_dicts = json.load(f)
+    prs = {
+        username: [PullRequest.from_dict(pr) for pr in prs]
+        for username, prs in pr_dicts.items()
+    }
 
     try:
         for student in students:

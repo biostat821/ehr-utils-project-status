@@ -1,6 +1,8 @@
 """Client for interacting with the GitHub API."""
 
+from __future__ import annotations
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Self
@@ -27,6 +29,21 @@ class Event:
     def creation_time(self: Self) -> str:
         return self.created_at.strftime("%Y-%m-%d %H:%M:%S")
 
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "created_at": self.created_at.isoformat(),
+            "type": self.type,
+            "reviewer": self.reviewer,
+        }
+
+    @staticmethod
+    def from_dict(serialized: dict[str, str]) -> Event:
+        return Event(
+            created_at=datetime.fromisoformat(serialized["created_at"]),
+            type=serialized["type"],
+            reviewer=serialized["reviewer"],
+        )
+
 
 @dataclass
 class PullRequest:
@@ -42,7 +59,7 @@ class PullRequest:
     timeline_events: list[Event]
 
     @staticmethod
-    def from_dict(pr, username, main_id):
+    def from_github_dict(pr, username, main_id):
         return PullRequest(
             username,
             branch=pr["headRefName"],
@@ -66,6 +83,38 @@ class PullRequest:
                 else []
             ),
             timeline_events=parse_events(pr),
+        )
+
+    def to_dict(self) -> dict[str, str | int | list[dict[str, str]]]:
+        return {
+            "owner": self.owner,
+            "branch": self.branch,
+            "created_at": self.created_at.isoformat(),
+            "title": self.title,
+            "permalink": self.permalink,
+            "number": self.number,
+            "state": self.state,
+            "based_on_main": self.based_on_main,
+            "behind_base": self.behind_base,
+            "timeline_events": [event.to_dict() for event in self.timeline_events],
+        }
+
+    @staticmethod
+    def from_dict(serialized) -> PullRequest:
+        return PullRequest(
+            owner=serialized["owner"],
+            branch=serialized["branch"],
+            created_at=datetime.fromisoformat(serialized["created_at"]),
+            title=serialized["title"],
+            permalink=serialized["permalink"],
+            number=serialized["number"],
+            state=serialized["state"],
+            based_on_main=serialized["based_on_main"],
+            behind_base=serialized["behind_base"],
+            timeline_events=[
+                Event.from_dict(event_dict)
+                for event_dict in serialized["timeline_events"]
+            ],
         )
 
 
@@ -174,9 +223,7 @@ class GithubClient:
     def get_repo_name(self: Self, username: str) -> str:
         return f"ehr-utils-{username}"
 
-    def list_prs(self: Self, usernames: list[str]) -> dict[str, list[PullRequest]]:
-        """Get data for PRs."""
-        results = dict()
+    def generate_query(self, usernames: list[str]) -> tuple[str, dict[str, str]]:
         repo_pieces = ""
         repos_by_username = dict()
         for idx, username in enumerate(usernames):
@@ -268,26 +315,47 @@ class GithubClient:
                     }}
                 }}
             """
-        response = httpx.post(
-            "https://api.github.com/graphql",
-            headers=self.headers,
-            json={
-                "query": f"""
-                {{{repo_pieces}}}
-                """
-            },
+        return (
+            f"""
+            {{{repo_pieces}}}
+            """,
+            repos_by_username,
         )
-        for username, repo_name in repos_by_username.items():
-            repo_data = response.json()["data"][repo_name]
-            if repo_data is None:
-                return {}
-            main_id = repo_data["defaultBranchRef"]["target"]["id"]
-            results[username] = sorted(
-                [
-                    PullRequest.from_dict(edge["node"], username, main_id)
-                    for edge in repo_data["pullRequests"]["edges"]
-                ],
-                key=lambda pr: pr.created_at,
+
+    def list_prs(self: Self, usernames: list[str]) -> dict[str, list[PullRequest]]:
+        """Get data for PRs."""
+        results: dict[str, list[PullRequest]] = dict()
+        start_idx = 0
+        batch_size = 10
+        while start_idx < len(usernames):
+            query, repos_by_username = self.generate_query(
+                usernames[start_idx : start_idx + batch_size]
             )
+            for timeout_seconds in (1, 2, 4, 8, 16):  # exponential backoff
+                response = httpx.post(
+                    "https://api.github.com/graphql",
+                    headers=self.headers,
+                    json={"query": query},
+                    timeout=20.0,
+                )
+                print(response.headers)
+                print(response.json())
+                if response.status_code == 200:
+                    break
+                print(f"Trying again in {timeout_seconds} seconds...")
+                time.sleep(timeout_seconds)
+            for username, repo_name in repos_by_username.items():
+                repo_data = response.json()["data"][repo_name]
+                if repo_data is None:
+                    return {}
+                main_id = repo_data["defaultBranchRef"]["target"]["id"]
+                results[username] = sorted(
+                    [
+                        PullRequest.from_github_dict(edge["node"], username, main_id)
+                        for edge in repo_data["pullRequests"]["edges"]
+                    ],
+                    key=lambda pr: pr.created_at,
+                )
+            start_idx += batch_size
 
         return results
