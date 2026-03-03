@@ -86,6 +86,21 @@ def td_to_str(td: timedelta) -> str:
     return string
 
 
+def str_to_td(string: str) -> timedelta:
+    """Convert string to timedelta."""
+    parts = string.split(",")
+    if len(parts) == 2:
+        days_str = parts[0].strip().split()[0]
+        days = int(days_str)
+        time_str = parts[1].strip()
+    else:
+        days = 0
+        time_str = string
+
+    h, m, s = map(float, time_str.split(":"))
+    return timedelta(days=days, hours=h, minutes=m, seconds=s)
+
+
 @dataclass
 class Extension:
     name: str
@@ -290,13 +305,13 @@ class EhrProjectStatus:
                 f.write(
                     f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
                 )
+        waiting_for = timedelta(0)
+        if (
+            pr_state_machine.last_review_requested
+            and pr_state_machine.state == PrState.UNDER_REVIEW
+        ):
+            waiting_for = now() - pr_state_machine.last_review_requested
         with open("outputs/status_summary.csv", "a") as f:
-            waiting_for = timedelta(0)
-            if (
-                pr_state_machine.last_review_requested
-                and pr_state_machine.state == PrState.UNDER_REVIEW
-            ):
-                waiting_for = now() - pr_state_machine.last_review_requested
             f.write(
                 f'"{self.name}",{self.username},{phase},{pr.permalink},"{pr_state_machine.state.value}","{td_to_str(late_by)}","{waiting_for}",\n'
             )
@@ -385,19 +400,6 @@ def get_data(organization, students) -> str:
     return pr_filename
 
 
-def parse_timedelta_string(td_str):
-    parts = td_str.split(",")
-    days = 0
-    time_str = td_str
-    if len(parts) == 2:
-        days_str = parts[0].strip().split()[0]
-        days = int(days_str)
-        time_str = parts[1].strip()
-
-    h, m, s = map(float, time_str.split(":"))
-    return timedelta(days=days, hours=h, minutes=m, seconds=s)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="ProjectStatus",
@@ -437,7 +439,7 @@ if __name__ == "__main__":
         reader = csv.DictReader(f)
         rows = list(reader)
     for row in rows:
-        row["waiting_for"] = parse_timedelta_string(row["waiting_for"])
+        row["waiting_for"] = str_to_td(row["waiting_for"])
     rows = sorted(
         rows,
         key=lambda row: (
@@ -449,7 +451,7 @@ if __name__ == "__main__":
         reverse=True,
     )
     for row in rows:
-        row["waiting_for"] = str(row["waiting_for"])
+        row["waiting_for"] = td_to_str(row["waiting_for"])
 
     github_client = GithubClient(organization)
     response = github_client.read_file("ehr-project-status", "status_summary.csv")
