@@ -2,7 +2,7 @@
 set -e
 
 echo "name,username,phase,pr,score" > "outputs/_summary.csv"
-echo "name,username,phase,pr,state,late_by,waiting_for" > "outputs/_state_summary.csv"
+echo "name,username,phase,pr,state,late_by,waiting_for,lead_reviewer" > "outputs/status_summary.csv"
 ./project_status.py $1
 while IFS=, read -r email name last
 do

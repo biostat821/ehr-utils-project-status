@@ -2,6 +2,7 @@
 """Utilities for analyzing and reporting EHR project status."""
 
 import argparse
+import base64
 import csv
 import json
 import math
@@ -289,7 +290,7 @@ class EhrProjectStatus:
                 f.write(
                     f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
                 )
-        with open("outputs/_state_summary.csv", "a") as f:
+        with open("outputs/status_summary.csv", "a") as f:
             waiting_for = timedelta(0)
             if (
                 pr_state_machine.last_review_requested
@@ -297,7 +298,7 @@ class EhrProjectStatus:
             ):
                 waiting_for = now() - pr_state_machine.last_review_requested
             f.write(
-                f'"{self.name}",{self.username},{phase},{pr.permalink},"{pr_state_machine.state.value}","{td_to_str(late_by)}",{waiting_for}\n'
+                f'"{self.name}",{self.username},{phase},{pr.permalink},"{pr_state_machine.state.value}","{td_to_str(late_by)}","{waiting_for}",\n'
             )
         return pr_report, approval, late_by
 
@@ -369,7 +370,7 @@ class EhrProjectStatus:
         write_document(self.username, pr_reports)
 
 
-def get_data(students) -> str:
+def get_data(organization, students) -> str:
     github_client = GithubClient(organization)
     prs = github_client.list_prs([student["username"] for student in students])
     pr_filename = (
@@ -384,6 +385,19 @@ def get_data(students) -> str:
     return pr_filename
 
 
+def parse_timedelta_string(td_str):
+    parts = td_str.split(",")
+    days = 0
+    time_str = td_str
+    if len(parts) == 2:
+        days_str = parts[0].strip().split()[0]
+        days = int(days_str)
+        time_str = parts[1].strip()
+
+    h, m, s = map(float, time_str.split(":"))
+    return timedelta(days=days, hours=h, minutes=m, seconds=s)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="ProjectStatus",
@@ -396,8 +410,7 @@ if __name__ == "__main__":
         students = list(csvreader)
 
     organization = "biostat821-2026"
-
-    pr_filename = get_data(students)
+    pr_filename = get_data(organization, students)
 
     with open(pr_filename) as f:
         pr_dicts = json.load(f)
@@ -414,3 +427,49 @@ if __name__ == "__main__":
     except Exception:
         print("Failed to generate PR reports:")
         traceback.print_exc()
+
+    # sort status_summary rows by:
+    # - state: under review, under development, merged, then closed
+    # - waiting_for (decreasing)
+    # - username
+    # - pr (decreasing)
+    with open("outputs/status_summary.csv") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    for row in rows:
+        row["waiting_for"] = parse_timedelta_string(row["waiting_for"])
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            row["state"],
+            row["waiting_for"],
+            row["username"],
+            row["pr"],
+        ),
+        reverse=True,
+    )
+    for row in rows:
+        row["waiting_for"] = str(row["waiting_for"])
+
+    github_client = GithubClient(organization)
+    response = github_client.read_file("ehr-project-status", "status_summary.csv")
+    latest_status_summary = base64.b64decode(response["content"]).decode()
+    reader = csv.DictReader(latest_status_summary.split("\n"))
+    latest_rows = list(reader)
+    lead_reviewer_by_pr = {row["pr"]: row["lead_reviewer"] for row in latest_rows}
+    rows = [
+        row | {"lead_reviewer": lead_reviewer_by_pr.get(row["pr"]) or ""}
+        for row in rows
+    ]
+    sha = response["sha"]
+
+    with open("outputs/status_summary.csv", "w") as f:
+        writer = csv.DictWriter(f, list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    print("outputs/status_summary.csv")
+
+    # write status_summary.csv to GitHub
+    with open("outputs/status_summary.csv", "rb") as f:
+        content = f.read()
+    github_client.upload_file("ehr-project-status", "status_summary.csv", sha, content)

@@ -1,6 +1,7 @@
 """Client for interacting with the GitHub API."""
 
 from __future__ import annotations
+import base64
 import os
 import time
 from dataclasses import dataclass
@@ -220,6 +221,46 @@ class GithubClient:
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
+    def read_file(
+        self,
+        repo: str,
+        filepath: str,
+    ):
+        endpoint = f"https://api.github.com/repos/{self.organization}/{repo}/contents/{filepath}"
+        response = httpx.get(
+            endpoint,
+            headers=self.headers,
+            timeout=20.0,
+        )
+        return response.json()
+
+    def upload_file(
+        self,
+        repo: str,
+        filepath: str,
+        sha: str,
+        content: bytes,
+        commit_message: str | None = None,
+    ):
+        if commit_message is None:
+            commit_message = f"Update {filepath}"
+        base64_content = base64.b64encode(content)
+        endpoint = f"https://api.github.com/repos/{self.organization}/{repo}/contents/{filepath}"
+        httpx.put(
+            endpoint,
+            headers=self.headers,
+            json={
+                "message": commit_message,
+                "committer": {
+                    "name": "Patrick Wang",
+                    "email": "patrickkwang@users.noreply.github.com",
+                },
+                "sha": sha,
+                "content": base64_content.decode("ascii"),
+            },
+            timeout=20.0,
+        )
+
     def get_repo_name(self: Self, username: str) -> str:
         return f"ehr-utils-{username}"
 
@@ -338,8 +379,6 @@ class GithubClient:
                     json={"query": query},
                     timeout=20.0,
                 )
-                print(response.headers)
-                print(response.json())
                 if response.status_code == 200:
                     break
                 print(f"Trying again in {timeout_seconds} seconds...")
