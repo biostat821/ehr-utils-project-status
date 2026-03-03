@@ -265,7 +265,7 @@ class EhrProjectStatus:
         pr: PullRequest,
         phase: int | None = None,
         last_approval: datetime | None = None,
-    ) -> tuple[str, datetime | None, timedelta]:
+    ) -> tuple[str, datetime | None, dict]:
         """Generate PR summary."""
         phase_start_time = last_approval if last_approval else self.start_time
         all_events = sorted(
@@ -311,11 +311,17 @@ class EhrProjectStatus:
             and pr_state_machine.state == PrState.UNDER_REVIEW
         ):
             waiting_for = now() - pr_state_machine.last_review_requested
-        with open("outputs/status_summary.csv", "a") as f:
-            f.write(
-                f'"{self.name}",{self.username},{phase},{pr.permalink},"{pr_state_machine.state.value}","{td_to_str(late_by)}","{waiting_for}",\n'
-            )
-        return pr_report, approval, late_by
+        summary = {
+            "name": self.name,
+            "username": self.username,
+            "phase": phase,
+            "pr": pr.permalink,
+            "state": pr_state_machine.state.value,
+            "late_by": late_by,
+            "waiting_for": waiting_for,
+            "lead_reviewer": "",
+        }
+        return pr_report, approval, summary
 
     def _infer_phases(self, pr: PullRequest, next_phase: int) -> list[int]:
         """Infer which phase(s) this PR is for.
@@ -365,24 +371,27 @@ class EhrProjectStatus:
                 phase_prs[phase].append(pr)
         return phase_prs
 
-    def generate_project_report(self: Self) -> None:
+    def generate_project_report(self: Self) -> list[dict]:
         """Generate PR summaries."""
         phase_prs = self._get_phase_prs()
         pr_reports = []
+        summaries = []
 
         last_approval = None
         for phase, prs in sorted(phase_prs.items()):
             for pr in prs:
-                pr_report, approval, _ = self._generate_pr_report(
+                pr_report, approval, summary = self._generate_pr_report(
                     pr, phase, last_approval
                 )
                 pr_reports.append((phase, pr, pr_report))
+                summaries.append(summary)
             if approval and phase < NUM_PHASES:
                 last_approval = approval
             else:
                 last_approval = None
 
         write_document(self.username, pr_reports)
+        return summaries
 
 
 def get_data(organization, students) -> str:
@@ -421,11 +430,13 @@ if __name__ == "__main__":
         for username, prs in pr_dicts.items()
     }
 
+    all_summaries = []
     try:
         for student in students:
-            EhrProjectStatus(
+            summaries = EhrProjectStatus(
                 student["username"], student["name"], prs
             ).generate_project_report()
+            all_summaries.extend(summaries)
     except Exception:
         print("Failed to generate PR reports:")
         traceback.print_exc()
@@ -435,13 +446,8 @@ if __name__ == "__main__":
     # - waiting_for (decreasing)
     # - username
     # - pr (decreasing)
-    with open("outputs/status_summary.csv") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    for row in rows:
-        row["waiting_for"] = str_to_td(row["waiting_for"])
-    rows = sorted(
-        rows,
+    all_summaries = sorted(
+        all_summaries,
         key=lambda row: (
             row["state"],
             row["waiting_for"],
@@ -450,8 +456,9 @@ if __name__ == "__main__":
         ),
         reverse=True,
     )
-    for row in rows:
+    for row in all_summaries:
         row["waiting_for"] = td_to_str(row["waiting_for"])
+        row["late_by"] = td_to_str(row["late_by"])
 
     github_client = GithubClient(organization)
     response = github_client.read_file("ehr-project-status", "status_summary.csv")
@@ -459,16 +466,14 @@ if __name__ == "__main__":
     reader = csv.DictReader(latest_status_summary.split("\n"))
     latest_rows = list(reader)
     lead_reviewer_by_pr = {row["pr"]: row["lead_reviewer"] for row in latest_rows}
-    rows = [
-        row | {"lead_reviewer": lead_reviewer_by_pr.get(row["pr"]) or ""}
-        for row in rows
-    ]
+    for row in all_summaries:
+        row["lead_reviewer"] = lead_reviewer_by_pr.get(row["pr"]) or ""
     sha = response["sha"]
 
     with open("outputs/status_summary.csv", "w") as f:
-        writer = csv.DictWriter(f, list(rows[0].keys()))
+        writer = csv.DictWriter(f, list(all_summaries[0].keys()))
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(all_summaries)
     print("outputs/status_summary.csv")
 
     # write status_summary.csv to GitHub
