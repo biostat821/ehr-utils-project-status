@@ -462,14 +462,18 @@ if __name__ == "__main__":
 
     github_client = GithubClient(organization)
     response = github_client.read_file("ehr-project-status", "status_summary.csv")
+    sha = response["sha"]
+
+    # get lead reviewers
     latest_status_summary = base64.b64decode(response["content"]).decode()
     reader = csv.DictReader(latest_status_summary.split("\n"))
     latest_rows = list(reader)
     lead_reviewer_by_pr = {row["pr"]: row["lead_reviewer"] for row in latest_rows}
+    # update summaries with lead reviewers
     for row in all_summaries:
         row["lead_reviewer"] = lead_reviewer_by_pr.get(row["pr"]) or ""
-    sha = response["sha"]
 
+    # write local status_summary.csv
     with open("outputs/status_summary.csv", "w") as f:
         writer = csv.DictWriter(f, list(all_summaries[0].keys()))
         writer.writeheader()
