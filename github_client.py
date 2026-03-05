@@ -6,6 +6,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from tqdm import tqdm
 from typing import Self
 from zoneinfo import ZoneInfo
 
@@ -368,33 +369,37 @@ class GithubClient:
         results: dict[str, list[PullRequest]] = dict()
         start_idx = 0
         batch_size = 10
-        while start_idx < len(usernames):
-            query, repos_by_username = self.generate_query(
-                usernames[start_idx : start_idx + batch_size]
-            )
-            for timeout_seconds in (1, 2, 4, 8, 16):  # exponential backoff
-                response = httpx.post(
-                    "https://api.github.com/graphql",
-                    headers=self.headers,
-                    json={"query": query},
-                    timeout=20.0,
-                )
-                if response.status_code == 200:
-                    break
-                print(f"Trying again in {timeout_seconds} seconds...")
-                time.sleep(timeout_seconds)
-            for username, repo_name in repos_by_username.items():
-                repo_data = response.json()["data"][repo_name]
-                if repo_data is None:
-                    return {}
-                main_id = repo_data["defaultBranchRef"]["target"]["id"]
-                results[username] = sorted(
-                    [
-                        PullRequest.from_github_dict(edge["node"], username, main_id)
-                        for edge in repo_data["pullRequests"]["edges"]
-                    ],
-                    key=lambda pr: pr.created_at,
-                )
-            start_idx += batch_size
+
+        with tqdm(total=len(usernames)) as pbar:
+            while start_idx < len(usernames):
+                username_batch = usernames[start_idx : start_idx + batch_size]
+                query, repos_by_username = self.generate_query(username_batch)
+                for timeout_seconds in (1, 2, 4, 8, 16):  # exponential backoff
+                    response = httpx.post(
+                        "https://api.github.com/graphql",
+                        headers=self.headers,
+                        json={"query": query},
+                        timeout=20.0,
+                    )
+                    if response.status_code == 200:
+                        break
+                    print(f"Trying again in {timeout_seconds} seconds...")
+                    time.sleep(timeout_seconds)
+                for username, repo_name in repos_by_username.items():
+                    repo_data = response.json()["data"][repo_name]
+                    if repo_data is None:
+                        return {}
+                    main_id = repo_data["defaultBranchRef"]["target"]["id"]
+                    results[username] = sorted(
+                        [
+                            PullRequest.from_github_dict(
+                                edge["node"], username, main_id
+                            )
+                            for edge in repo_data["pullRequests"]["edges"]
+                        ],
+                        key=lambda pr: pr.created_at,
+                    )
+                start_idx += batch_size
+                pbar.update(len(username_batch))
 
         return results
