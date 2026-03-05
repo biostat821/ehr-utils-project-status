@@ -91,6 +91,8 @@ class PrStateMachine:
                 new_state = PrState.MERGED
             else:
                 new_state = PrState.CLOSED
+        elif self.state == PrState.CLOSED:
+            return None
         elif (
             not self.reviewer_states["patrickkwang"] == ReviewerState.APPROVED
             and self.state == PrState.WAITING
