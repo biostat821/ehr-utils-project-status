@@ -1,5 +1,6 @@
 """Model PR state transitions."""
 
+from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -8,6 +9,38 @@ from typing import Self
 from zoneinfo import ZoneInfo
 
 from github_client import Event
+
+
+@dataclass
+class Period:
+    start: datetime
+    end: datetime
+
+    @property
+    def duration(self) -> timedelta:
+        return self.end - self.start
+
+    def __str__(self) -> str:
+        return f"[{self.start} -> {self.end})"
+
+    def __sub__(self, other: Period) -> timedelta:
+        """Return time in this period but not in the other period."""
+        if other.start > self.end or self.start > other.end:
+            return self.end - self.start
+        duration = timedelta()
+        if self.start < other.start:
+            duration += other.start - self.start
+        if other.end < self.end:
+            duration += self.end - other.end
+        return duration
+
+
+_PAUSES = {
+    "spring break": Period(
+        datetime(2026, 3, 6, hour=19, tzinfo=ZoneInfo("America/New_York")),
+        datetime(2026, 3, 16, hour=8, minute=30, tzinfo=ZoneInfo("America/New_York")),
+    )
+}
 
 _APPROVERS = {"patrickkwang", "Surguladze99", "skylershapiro"}
 
@@ -134,23 +167,27 @@ class PrStateMachine:
 
         if new_state == self.state:
             return None
-        elapsed_in_state = event.created_at - self.last_state_change_time
+        in_state_period = Period(self.last_state_change_time, event.created_at)
+        elapsed_in_state = in_state_period.duration
         self._set_state(new_state, event.created_at)
 
         if self.previous_state == PrState.UNDER_REVIEW:
             self.total_under_review_duration += elapsed_in_state
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
-            self.total_under_development_duration += elapsed_in_state
+            self.total_under_development_duration += (
+                in_state_period - _PAUSES["spring break"]
+            )
 
         return elapsed_in_state
 
     def _wrap_up(self):
+        in_state_period = Period(self.last_state_change_time, now())
         if self.state == PrState.UNDER_DEVELOPMENT:
-            duration = now() - self.last_state_change_time
-            self.total_under_development_duration += duration
+            self.total_under_development_duration += (
+                in_state_period - _PAUSES["spring break"]
+            )
         elif self.state == PrState.UNDER_REVIEW:
-            duration = now() - self.last_state_change_time
-            self.total_under_review_duration += duration
+            self.total_under_review_duration += in_state_period.duration
 
     def _update_reviewer_states(self: Self, event: Event):
         """Update reviewer states based on event."""
