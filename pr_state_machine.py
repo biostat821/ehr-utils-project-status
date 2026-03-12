@@ -82,18 +82,8 @@ class PrStateMachine:
     def previous_state(self) -> PrState:
         return self._previous_state
 
-    def _update_pr_state(self, event: Event) -> timedelta | None:
-        """Update the state in response to a new event."""
-        if event.type == "MERGED":
-            new_state = PrState.MERGED
-        elif event.type == "CLOSED":
-            if self.state == PrState.MERGED:
-                new_state = PrState.MERGED
-            else:
-                new_state = PrState.CLOSED
-        elif self.state == PrState.CLOSED:
-            return None
-        elif (
+    def _update_pr_state_based_on_reviewers(self, event: Event) -> PrState:
+        if (
             not self.reviewer_states["patrickkwang"] == ReviewerState.APPROVED
             and self.state == PrState.WAITING
         ):
@@ -120,6 +110,21 @@ class PrStateMachine:
             new_state = PrState.UNDER_REVIEW
         else:
             new_state = PrState.UNDER_DEVELOPMENT
+        return new_state
+
+    def _update_pr_state(self, event: Event) -> timedelta | None:
+        """Update the state in response to a new event."""
+        if self.state == PrState.CLOSED and event.type != "REOPENED":
+            return None
+        elif event.type == "CLOSED":
+            if self.state == PrState.MERGED:
+                new_state = PrState.MERGED
+            else:
+                new_state = PrState.CLOSED
+        elif event.type == "MERGED":
+            new_state = PrState.MERGED
+        else:
+            new_state = self._update_pr_state_based_on_reviewers(event)
 
         if new_state == self.state:
             return None

@@ -198,13 +198,51 @@ def parse_events(pr) -> list[Event]:
         if timeline_item["__typename"] == "ClosedEvent"
     ]
 
+    reopens = [
+        Event(created_at=et_datetime(timeline_item["createdAt"]), type="REOPENED")
+        for timeline_item in timeline_items
+        if timeline_item["__typename"] == "ReopenedEvent"
+    ]
+    other = [
+        timeline_item
+        for timeline_item in timeline_items
+        if timeline_item["__typename"]
+        not in (
+            "ClosedEvent",
+            "ReopenedEvent",
+            "MergedEvent",
+            "IssueComment",  # ignore these
+            "PullRequestCommit",  # ignore these
+            "PullRequestRevisionMarker",  # ignore these
+            "AssignedEvent",  # ignore these
+            "UnassignedEvent",  # ignore these
+            "MentionedEvent",  # ignore these
+            "SubscribedEvent",  # ignore these
+            "ConvertToDraftEvent",  # ignore these
+            "ReadyForReviewEvent",  # ignore these
+            "HeadRefDeletedEvent",  # ???
+            "HeadRefForcePushedEvent",  # ???
+            "HeadRefRestoredEvent",  # ???
+            "CrossReferencedEvent",  # ???
+            "CommentDeletedEvent",  # ignore these
+            "RenamedTitleEvent",  # ignore these
+            "PullRequestReview",
+            "ReviewRequestedEvent",
+            "ReviewDismissedEvent",
+            "ReviewRequestRemovedEvent",
+        )
+    ]
+    if other:
+        raise ValueError(other)
+
     return sorted(
         reviews_requested
         + reviews
         + review_requests_removed
         + reviews_dismissed
         + merges
-        + closes,
+        + closes
+        + reopens,
         key=lambda event: event.created_at,
     )
 
@@ -347,6 +385,9 @@ class GithubClient:
                                                 createdAt
                                             }}
                                             ... on ClosedEvent {{
+                                                createdAt
+                                            }}
+                                            ... on ReopenedEvent {{
                                                 createdAt
                                             }}
                                         }}
