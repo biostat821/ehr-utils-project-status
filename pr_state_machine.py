@@ -148,21 +148,24 @@ class PrStateMachine:
 
     def _update_reviewer_states(self: Self, event: Event):
         """Update reviewer states based on event."""
+        reviewer = event.reviewer
+        if reviewer is None:
+            return
         if event.type in ("REVIEW_REQUESTED", "REVIEW_DISMISSED"):
-            if self.reviewer_states[event.reviewer] != ReviewerState.APPROVED:
-                self.reviewer_states[event.reviewer] = ReviewerState.REVIEW_REQUESTED
+            if self.reviewer_states[reviewer] != ReviewerState.APPROVED:
+                self.reviewer_states[reviewer] = ReviewerState.REVIEW_REQUESTED
             else:
-                self.reviewer_states[event.reviewer] = (
+                self.reviewer_states[reviewer] = (
                     ReviewerState.REVIEW_REQUESTED_POST_APPROVAL
                 )
             self.last_review_requested = event.created_at
         elif event.type == "REVIEW_REQUEST_REMOVED":
-            del self.reviewer_states[event.reviewer]
+            del self.reviewer_states[reviewer]
         elif event.type == "CHANGES_REQUESTED":
-            self.reviewer_states[event.reviewer] = ReviewerState.REQUESTED_CHANGES
+            self.reviewer_states[reviewer] = ReviewerState.REQUESTED_CHANGES
         elif event.type == "APPROVED":
-            self.reviewer_states[event.reviewer] = ReviewerState.APPROVED
-        # ignore Commented
+            self.reviewer_states[reviewer] = ReviewerState.APPROVED
+        # ignore COMMENTED
 
     def process_events(
         self: Self, events: list[Event]

@@ -87,7 +87,7 @@ class PullRequest:
             timeline_events=parse_events(pr),
         )
 
-    def to_dict(self) -> dict[str, str | int | list[dict[str, str]]]:
+    def to_dict(self) -> dict[str, str | int | list[dict[str, str | None]]]:
         return {
             "owner": self.owner,
             "branch": self.branch,
