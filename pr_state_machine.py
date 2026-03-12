@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 from github_client import Event
 
+_APPROVERS = {"patrickkwang", "Surguladze99", "skylershapiro"}
+
 
 def now() -> datetime:
     """Get current date time in Eastern time zone."""
@@ -82,22 +84,26 @@ class PrStateMachine:
     def previous_state(self) -> PrState:
         return self._previous_state
 
+    @property
+    def approved(self) -> bool:
+        for approver in _APPROVERS:
+            if self.reviewer_states[approver] in (
+                ReviewerState.APPROVED,
+                ReviewerState.REVIEW_REQUESTED_POST_APPROVAL,
+            ):
+                return True
+        return False
+
     def _update_pr_state_based_on_reviewers(self, event: Event) -> PrState:
-        if (
-            not self.reviewer_states["patrickkwang"] == ReviewerState.APPROVED
-            and self.state == PrState.WAITING
-        ):
+        if self.approved:
+            new_state = PrState.APPROVED
+            if self.finish_time is None:
+                self.finish_time = self.last_review_requested
+        elif self.state == PrState.WAITING:
             if event.type == "PREVIOUS_PHASE_APPROVED":
                 new_state = PrState.UNDER_DEVELOPMENT
             else:
                 new_state = PrState.WAITING
-        elif self.reviewer_states["patrickkwang"] in (
-            ReviewerState.APPROVED,
-            ReviewerState.REVIEW_REQUESTED_POST_APPROVAL,
-        ):
-            new_state = PrState.APPROVED
-            if self.finish_time is None:
-                self.finish_time = self.last_review_requested
         elif any(
             reviewer_state == ReviewerState.REQUESTED_CHANGES
             for reviewer_state in self.reviewer_states.values()
