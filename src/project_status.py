@@ -276,6 +276,7 @@ if __name__ == "__main__":
     with open(args.filename) as f:
         csvreader = csv.DictReader(f)
         students = list(csvreader)
+        print(f"Got students: {students}")
 
     organization = "biostat821-2026"
     pr_dicts, pr_filename = get_data(organization, students)

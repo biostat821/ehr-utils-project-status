@@ -78,8 +78,10 @@ def write_document(
     if not pages:
         document += "No pull requests"
     document += "\n\n#pagebreak()\n\n".join(pages)
-    with open(f"outputs/{username}.typ", "w") as f:
+    filename = f"outputs/{username}.typ"
+    with open(filename, "w") as f:
         f.write(document)
+        print(f"Wrote {filename}.")
 
 
 status_col_width = 17
