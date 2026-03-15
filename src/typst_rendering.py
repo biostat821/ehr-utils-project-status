@@ -1,4 +1,5 @@
 import textwrap
+from pathlib import Path
 from typing import Any
 
 from github_client import PullRequest
@@ -34,7 +35,9 @@ def _create_page_header(phase: int, pr: PullRequest) -> str:
 
 
 def write_document(
-    username: str, pr_reports: list[tuple[int, PullRequest, DocumentSpec]]
+    username: str,
+    pr_reports: list[tuple[int, PullRequest, DocumentSpec]],
+    outputs_path: Path,
 ) -> None:
     pages = [
         _create_page_header(phase, pr) + _construct_pr_report(pr_report)
@@ -78,7 +81,7 @@ def write_document(
     if not pages:
         document += "No pull requests"
     document += "\n\n#pagebreak()\n\n".join(pages)
-    filename = f"outputs/{username}.typ"
+    filename = outputs_path / f"{username}.typ"
     with open(filename, "w") as f:
         f.write(document)
         print(f"Wrote {filename}.")

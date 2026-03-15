@@ -109,6 +109,7 @@ class EhrProjectStatus:
         username: str,
         name: str,
         prs: dict[str, list[PullRequest]],
+        outputs_path: Path,
     ):
         """Initialize."""
         self.username = username
@@ -121,6 +122,7 @@ class EhrProjectStatus:
             "phase_mapping_overrides.csv"
         )
         self.prs = prs
+        self.outputs_path = outputs_path
 
     start_time = datetime(2026, 2, 13, 23, 59, 59, tzinfo=ZoneInfo("America/New_York"))
     phase_time_budget = timedelta(days=7)
@@ -164,7 +166,7 @@ class EhrProjectStatus:
             points_deducted,
         )
         if points_deducted is not None:
-            with open("outputs/_summary.csv", "a") as f:
+            with open(self.outputs_path / "_summary.csv", "a") as f:
                 f.write(
                     f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
                 )
@@ -253,7 +255,7 @@ class EhrProjectStatus:
             else:
                 last_approval = None
 
-        write_document(self.username, pr_reports)
+        write_document(self.username, pr_reports, self.outputs_path)
         return summaries
 
 
@@ -302,11 +304,13 @@ if __name__ == "__main__":
         for username, prs in pr_dicts.items()
     }
 
+    outputs_path = Path("outputs")
+    outputs_path.mkdir(parents=True, exist_ok=True)
     all_summaries = []
     try:
         for student in students:
             summaries = EhrProjectStatus(
-                student["username"], student["name"], prs
+                student["username"], student["name"], prs, outputs_path=outputs_path
             ).generate_project_report()
             all_summaries.extend(summaries)
     except Exception:
