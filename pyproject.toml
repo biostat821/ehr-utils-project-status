@@ -19,6 +19,10 @@ version = "2.0.0"
 authors = [
   { name="Patrick Wang", email="patrick.wang@duke.edu" },
 ]
+dependencies = [
+  "httpx==0.26.0",
+  "tqdm>=4.67.3",
+]
 description = "Tools for understanding the status of EHR utils projects."
 readme = "README.md"
 requires-python = ">=3.9"
