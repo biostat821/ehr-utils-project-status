@@ -1,16 +1,17 @@
 """Client for interacting with the GitHub API."""
 
 from __future__ import annotations
+
 import base64
 import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from tqdm import tqdm
 from typing import Any, Self
 from zoneinfo import ZoneInfo
 
 import httpx
+from tqdm import tqdm
 
 
 def et_datetime(iso: str) -> datetime:
