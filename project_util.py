@@ -40,19 +40,6 @@ def now() -> datetime:
     return datetime.now(tz=ZoneInfo("America/New_York")).replace(microsecond=0)
 
 
-def pad_to(x, n: int) -> str:
-    """Convert to string and pad with escaped spaces.
-
-    This is handy for LaTeX with monospaced font.
-    """
-    x_str = str(x)
-    padding = n - len(x_str)
-    if padding >= 3:
-        return "." * (padding - 1) + r"\ " + x_str
-    else:
-        return r"\ " * padding + x_str
-
-
 def td_to_str(td: timedelta) -> str:
     """Convert timedelta to string."""
     abs_td = abs(td)

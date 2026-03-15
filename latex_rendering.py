@@ -1,7 +1,20 @@
 import textwrap
 
 from github_client import PullRequest
-from project_util import PHASES, DocumentSpec, now, pad_to, td_to_str
+from project_util import PHASES, DocumentSpec, now, td_to_str
+
+
+def _pad_to(x, n: int) -> str:
+    """Convert to string and pad with escaped spaces.
+
+    This is handy for LaTeX with monospaced font.
+    """
+    x_str = str(x)
+    padding = n - len(x_str)
+    if padding >= 3:
+        return "." * (padding - 1) + r"\ " + x_str
+    else:
+        return r"\ " * padding + x_str
 
 
 def _escape_latex(raw: str) -> str:
@@ -78,16 +91,16 @@ def _construct_pr_report(documentSpec: DocumentSpec) -> str:
         previous_state = entry.previous_state
         elapsed_in_state = entry.elapsed_in_state
         if elapsed_in_state:
-            document += f"{timestamp} & {event_summary} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
+            document += f"{timestamp} & {event_summary} & {previous_state.value} for {_pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
         else:
             document += f"{timestamp} & {event_summary} & \\\\\n"
     document += "\\midrule\n"
-    document += f"&& under development for {pad_to(td_to_str(documentSpec.total_under_development_duration), 17)} \\\\\n"
-    document += f"&& under review for {pad_to(td_to_str(documentSpec.total_under_review_duration), 17)} \\\\\n"
+    document += f"&& under development for {_pad_to(td_to_str(documentSpec.total_under_development_duration), 17)} \\\\\n"
+    document += f"&& under review for {_pad_to(td_to_str(documentSpec.total_under_review_duration), 17)} \\\\\n"
     if documentSpec.late_by:
-        document += f"&& late by {pad_to(td_to_str(documentSpec.late_by), 17)} \\\\\n"
+        document += f"&& late by {_pad_to(td_to_str(documentSpec.late_by), 17)} \\\\\n"
     if documentSpec.points_deducted is not None:
-        document += f"&& \\textbf{{points deducted}}: \\textbf{{{pad_to(documentSpec.points_deducted, 17)}}} \\\\\n"
+        document += f"&& \\textbf{{points deducted}}: \\textbf{{{_pad_to(documentSpec.points_deducted, 17)}}} \\\\\n"
     document += textwrap.dedent("""
                                 \\bottomrule
                                 \\end{longtable}

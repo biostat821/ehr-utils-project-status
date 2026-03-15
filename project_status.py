@@ -21,7 +21,9 @@ from github_client import (
     GithubClient,
     PullRequest,
 )
-from latex_rendering import write_document
+
+# from latex_rendering import write_document
+from typst_rendering import write_document
 from pr_state_machine import PrState, PrStateMachine
 from project_util import NUM_PHASES, PHASES, DocumentSpec, now, td_to_str
 
