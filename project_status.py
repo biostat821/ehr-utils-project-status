@@ -71,15 +71,14 @@ def pad_to(x, n: int) -> str:
 
 def td_to_str(td: timedelta) -> str:
     """Convert timedelta to string."""
-    sign = "-" if td < timedelta(0) else ""
     abs_td = abs(td)
     remainder = int(abs_td.total_seconds())
     days, remainder = divmod(remainder, 86400)
-    string = ""
+    string = "-" if td < timedelta(0) else ""
     if days == 1:
-        string += f"{sign}{days} day, "
+        string += f"{days} day, "
     elif days > 1:
-        string += f"{sign}{days} days, "
+        string += f"{days} days, "
     hours, remainder = divmod(remainder, 3600)
     minutes, seconds = divmod(remainder, 60)
     string += f"{hours:02}:{minutes:02}:{seconds:02}"
