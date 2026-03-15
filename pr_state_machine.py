@@ -206,7 +206,12 @@ class PrStateMachine:
             if self.state == PrState.APPROVED and approval is None:
                 approval = event.created_at
             entries.append(
-                Entry(event.get_summary(), self.previous_state, elapsed_in_state)
+                Entry(
+                    event.creation_time,
+                    event.get_summary(),
+                    self.previous_state,
+                    elapsed_in_state,
+                )
             )
         self._wrap_up()
         return entries, approval

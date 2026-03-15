@@ -73,13 +73,14 @@ def _construct_pr_report(documentSpec: DocumentSpec) -> str:
                                 \\midrule
                                 """).strip()
     for entry in documentSpec.entries:
+        timestamp = entry.timestamp
         event_summary = entry.summary
         previous_state = entry.previous_state
         elapsed_in_state = entry.elapsed_in_state
         if elapsed_in_state:
-            document += f"{event_summary} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
+            document += f"{timestamp} & {event_summary} & {previous_state.value} for {pad_to(td_to_str(elapsed_in_state), 17)} \\\\\n"
         else:
-            document += f"{event_summary} & \\\\\n"
+            document += f"{timestamp} & {event_summary} & \\\\\n"
     document += "\\midrule\n"
     document += f"&& under development for {pad_to(td_to_str(documentSpec.total_under_development_duration), 17)} \\\\\n"
     document += f"&& under review for {pad_to(td_to_str(documentSpec.total_under_review_duration), 17)} \\\\\n"

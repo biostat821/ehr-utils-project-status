@@ -20,6 +20,7 @@ class PrState(Enum):
 
 @dataclass
 class Entry:
+    timestamp: str
     summary: str
     previous_state: PrState
     elapsed_in_state: timedelta | None
