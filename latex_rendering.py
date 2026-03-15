@@ -4,16 +4,16 @@ from github_client import PullRequest
 from project_util import PHASES, DocumentSpec, now, pad_to, td_to_str
 
 
-def escape_latex(raw: str) -> str:
+def _escape_latex(raw: str) -> str:
     """Escape ampersands in strings bound for LaTeX."""
     return raw.replace("&", "\\&")
 
 
-def create_page_header(phase: int, pr: PullRequest) -> str:
+def _create_page_header(phase: int, pr: PullRequest) -> str:
     return (
         f"\\fancyfoot[R]{{\\setfont phase {phase:02}}}"
         + "\n\\noindent\n\\textbf{pull request}:\\\\\n"
-        + f'"{escape_latex(pr.title)}" (branch "{pr.branch}")\\\\\n'
+        + f'"{_escape_latex(pr.title)}" (branch "{pr.branch}")\\\\\n'
         + f"\\url{{{pr.permalink}}}\\\\\n"
         + (
             "\\\\\n"
@@ -29,7 +29,7 @@ def write_document(
     username: str, pr_reports: list[tuple[int, PullRequest, DocumentSpec]]
 ):
     pages = [
-        create_page_header(phase, pr) + _construct_pr_report(pr_report)
+        _create_page_header(phase, pr) + _construct_pr_report(pr_report)
         for phase, pr, pr_report in pr_reports
     ]
     document = textwrap.dedent(f"""
