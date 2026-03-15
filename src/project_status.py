@@ -250,21 +250,20 @@ class EhrProjectStatus:
 
 def get_data(
     organization: str, students: list[dict[str, Any]], cache: bool = False
-) -> str:
+) -> tuple[dict[str, Any], str | None]:
     github_client = GithubClient(organization)
     prs = github_client.list_prs([student["username"] for student in students])
+    pr_dicts = {username: [pr.to_dict() for pr in prs] for username, prs in prs.items()}
+    pr_filename = None
     if cache:
         pr_filename = f"pr_cache/pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
         with open(pr_filename, "w") as f:
             json.dump(
-                {
-                    username: [pr.to_dict() for pr in prs]
-                    for username, prs in prs.items()
-                },
+                pr_dicts,
                 f,
                 indent=4,
             )
-    return pr_filename
+    return pr_dicts, pr_filename
 
 
 if __name__ == "__main__":
@@ -279,10 +278,11 @@ if __name__ == "__main__":
         students = list(csvreader)
 
     organization = "biostat821-2026"
-    pr_filename = get_data(organization, students)
+    pr_dicts, pr_filename = get_data(organization, students)
+    # pr_filename = "pr_cache/pull_requests_20260315092823.json"
+    # with open(pr_filename) as f:
+    #     pr_dicts = json.load(f)
 
-    with open(pr_filename) as f:
-        pr_dicts = json.load(f)
     prs = {
         username: [PullRequest.from_dict(pr) for pr in prs]
         for username, prs in pr_dicts.items()
