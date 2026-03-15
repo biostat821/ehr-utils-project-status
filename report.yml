@@ -1,0 +1,36 @@
+name: report
+
+on:
+  workflow_dispatch:
+
+jobs:
+  report:
+    name: report
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install typst
+      run: |
+        sudo snap install typst
+
+    - name: Install ehr-utils-project-status
+      run: |
+        pip install ehr_utils_project_status@git+https://github.com/biostat821/ehr-utils-project-status.git@main
+
+    - name: Get username and timestamp
+      run: |
+        echo "USERNAME=${GITHUB_REPOSITORY#biostat821-2026/ehr-utils-}" >> $GITHUB_ENV
+        TIMESTAMP=$(date +'%Y%m%d%H%M%S')
+        echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
+
+    - name: Compile report
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        python -m project_status --username=${{  env.USERNAME  }}
+        typst compile outputs/${{ env.USERNAME }}.typ outputs/ehr-utils-${{ env.USERNAME }}_report_${{ env.TIMESTAMP }}.pdf
+
+    - name: Upload PDF report
+      uses: actions/upload-artifact@v4
+      with:
+        name: project-report-${{ env.TIMESTAMP }}
+        path: outputs/ehr-utils-${{ env.USERNAME }}_report_${{ env.TIMESTAMP }}.pdf
