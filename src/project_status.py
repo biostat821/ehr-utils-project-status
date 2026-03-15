@@ -271,12 +271,16 @@ if __name__ == "__main__":
         prog="ProjectStatus",
         description="Generates project status reports",
     )
-    parser.add_argument("filename")
+    parser.add_argument("--filename")
+    parser.add_argument("--username")
     args = parser.parse_args()
-    with open(args.filename) as f:
-        csvreader = csv.DictReader(f)
-        students = list(csvreader)
-        print(f"Got students: {students}")
+    if args.filename:
+        with open(args.filename) as f:
+            csvreader = csv.DictReader(f)
+            students = list(csvreader)
+            print(f"Got students: {students}")
+    elif args.username:
+        students = [{"email": "", "name": "", "username": args.username}]
 
     organization = "biostat821-2026"
     pr_dicts, pr_filename = get_data(organization, students)
