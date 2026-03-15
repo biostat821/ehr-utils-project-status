@@ -1,6 +1,7 @@
 """Model PR state transitions."""
 
 from __future__ import annotations
+
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -9,6 +10,7 @@ from typing import Self
 from zoneinfo import ZoneInfo
 
 from github_client import Event
+from project_util import Entry, PrState
 
 
 @dataclass
@@ -58,24 +60,6 @@ class ReviewerState(Enum):
     REQUESTED_CHANGES = "requested changes"
     APPROVED = "approved"
     REVIEW_REQUESTED_POST_APPROVAL = "review requested (post-approval)"
-
-
-class PrState(Enum):
-    """State of a PR."""
-
-    WAITING = "awaiting previous phase"
-    UNDER_DEVELOPMENT = "under development"
-    UNDER_REVIEW = "under review"
-    APPROVED = "approved"
-    MERGED = "merged"
-    CLOSED = "closed"
-
-
-@dataclass
-class Entry:
-    summary: str
-    previous_state: PrState
-    elapsed_in_state: timedelta | None
 
 
 class PrStateMachine:
