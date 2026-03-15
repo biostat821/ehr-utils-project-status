@@ -1,10 +1,11 @@
 import textwrap
+from typing import Any
 
 from github_client import PullRequest
 from project_util import PHASES, DocumentSpec, now, td_to_str
 
 
-def _pad_to(x, n: int) -> str:
+def _pad_to(x: Any, n: int) -> str:
     """Convert to string and pad with escaped spaces.
 
     This is handy for LaTeX with monospaced font.
@@ -40,7 +41,7 @@ def _create_page_header(phase: int, pr: PullRequest) -> str:
 
 def write_document(
     username: str, pr_reports: list[tuple[int, PullRequest, DocumentSpec]]
-):
+) -> None:
     pages = [
         _create_page_header(phase, pr) + _construct_pr_report(pr_report)
         for phase, pr, pr_report in pr_reports

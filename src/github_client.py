@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from tqdm import tqdm
-from typing import Self
+from typing import Any, Self
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -61,7 +61,9 @@ class PullRequest:
     timeline_events: list[Event]
 
     @staticmethod
-    def from_github_dict(pr, username, main_id):
+    def from_github_dict(
+        pr: dict[str, Any], username: str, main_id: str
+    ) -> PullRequest:
         return PullRequest(
             username,
             branch=pr["headRefName"],
@@ -102,7 +104,7 @@ class PullRequest:
         }
 
     @staticmethod
-    def from_dict(serialized) -> PullRequest:
+    def from_dict(serialized: dict[str, Any]) -> PullRequest:
         return PullRequest(
             owner=serialized["owner"],
             branch=serialized["branch"],
@@ -120,7 +122,7 @@ class PullRequest:
         )
 
 
-def get_event(timeline_item) -> Event:
+def get_event(timeline_item: dict[str, Any]) -> Event:
     # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
     if timeline_item["state"] in ("APPROVED", "DISMISSED"):
         return Event(
@@ -143,7 +145,7 @@ def get_event(timeline_item) -> Event:
     raise ValueError(f"Unrecognized review type {timeline_item}")
 
 
-def parse_events(pr) -> list[Event]:
+def parse_events(pr: dict[str, Any]) -> list[Event]:
     timeline_items = [edge["node"] for edge in pr["timelineItems"]["edges"]]
     reviews_requested = [
         Event(
@@ -264,7 +266,7 @@ class GithubClient:
         self,
         repo: str,
         filepath: str,
-    ):
+    ) -> Any:
         endpoint = f"https://api.github.com/repos/{self.organization}/{repo}/contents/{filepath}"
         response = httpx.get(
             endpoint,
@@ -280,7 +282,7 @@ class GithubClient:
         sha: str,
         content: bytes,
         commit_message: str | None = None,
-    ):
+    ) -> None:
         if commit_message is None:
             commit_message = f"Update {filepath}"
         base64_content = base64.b64encode(content)

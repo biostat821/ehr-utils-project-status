@@ -13,7 +13,7 @@ import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Self
+from typing import Any, Self
 from zoneinfo import ZoneInfo
 
 from github_client import (
@@ -24,8 +24,8 @@ from github_client import (
 
 # from latex_rendering import write_document
 from typst_rendering import write_document
-from pr_state_machine import PrState, PrStateMachine
-from project_util import NUM_PHASES, PHASES, DocumentSpec, now, td_to_str
+from pr_state_machine import PrStateMachine
+from project_util import NUM_PHASES, PHASES, DocumentSpec, PrState, now, td_to_str
 
 
 def guess_phase(pr_title: str) -> int | None:
@@ -121,7 +121,7 @@ class EhrProjectStatus:
         pr: PullRequest,
         phase: int | None = None,
         last_approval: datetime | None = None,
-    ) -> tuple[DocumentSpec, datetime | None, dict]:
+    ) -> tuple[DocumentSpec, datetime | None, dict[str, Any]]:
         """Generate PR summary."""
         phase_start_time = last_approval if last_approval else self.start_time
         all_events = sorted(
@@ -225,7 +225,7 @@ class EhrProjectStatus:
                 phase_prs[phase].append(pr)
         return phase_prs
 
-    def generate_project_report(self: Self) -> list[dict]:
+    def generate_project_report(self: Self) -> list[dict[str, Any]]:
         """Generate PR summaries."""
         phase_prs = self._get_phase_prs()
         pr_reports = []
@@ -248,7 +248,7 @@ class EhrProjectStatus:
         return summaries
 
 
-def get_data(organization, students) -> str:
+def get_data(organization: str, students: list[dict[str, Any]]) -> str:
     github_client = GithubClient(organization)
     prs = github_client.list_prs([student["username"] for student in students])
     pr_filename = f"pr_cache/pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"

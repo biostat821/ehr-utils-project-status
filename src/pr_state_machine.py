@@ -92,7 +92,7 @@ class PrStateMachine:
     def last_state_change_time(self) -> datetime:
         return self._last_state_change_time
 
-    def _set_state(self, state: PrState, event_time: datetime):
+    def _set_state(self, state: PrState, event_time: datetime) -> None:
         self._last_state_change_time = event_time
         self._previous_state = self._state
         self._state = state
@@ -164,7 +164,7 @@ class PrStateMachine:
 
         return elapsed_in_state
 
-    def _wrap_up(self):
+    def _wrap_up(self) -> None:
         in_state_period = Period(self.last_state_change_time, now())
         if self.state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += (
@@ -173,7 +173,7 @@ class PrStateMachine:
         elif self.state == PrState.UNDER_REVIEW:
             self.total_under_review_duration += in_state_period.duration
 
-    def _update_reviewer_states(self: Self, event: Event):
+    def _update_reviewer_states(self: Self, event: Event) -> None:
         """Update reviewer states based on event."""
         reviewer = event.reviewer
         if reviewer is None:
