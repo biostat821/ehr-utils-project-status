@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Utilities for analyzing and reporting EHR project status."""
 
+from __future__ import annotations
 import argparse
 import base64
 import csv
@@ -153,9 +154,12 @@ def create_page_header(phase: int, pr: PullRequest) -> str:
     )
 
 
-def write_document(username: str, pr_reports: list[tuple[int, PullRequest, str]]):
+def write_document(
+    username: str, pr_reports: list[tuple[int, PullRequest, DocumentSpec]]
+):
     pages = [
-        create_page_header(phase, pr) + pr_report for phase, pr, pr_report in pr_reports
+        create_page_header(phase, pr) + _construct_pr_report(pr_report)
+        for phase, pr, pr_report in pr_reports
     ]
     document = textwrap.dedent(f"""
                 \\documentclass{{article}}
@@ -264,7 +268,7 @@ class EhrProjectStatus:
         pr: PullRequest,
         phase: int | None = None,
         last_approval: datetime | None = None,
-    ) -> tuple[str, datetime | None, dict]:
+    ) -> tuple[DocumentSpec, datetime | None, dict]:
         """Generate PR summary."""
         phase_start_time = last_approval if last_approval else self.start_time
         all_events = sorted(
@@ -290,14 +294,12 @@ class EhrProjectStatus:
         else:
             points_deducted = None
 
-        pr_report = _construct_pr_report(
-            DocumentSpec(
-                entries,
-                pr_state_machine.total_under_development_duration,
-                pr_state_machine.total_under_review_duration,
-                late_by,
-                points_deducted,
-            ),
+        doc_spec = DocumentSpec(
+            entries,
+            pr_state_machine.total_under_development_duration,
+            pr_state_machine.total_under_review_duration,
+            late_by,
+            points_deducted,
         )
         if points_deducted is not None:
             with open("outputs/_summary.csv", "a") as f:
@@ -320,7 +322,7 @@ class EhrProjectStatus:
             "waiting_for": waiting_for,
             "lead_reviewer": "",
         }
-        return pr_report, approval, summary
+        return doc_spec, approval, summary
 
     def _infer_phases(self, pr: PullRequest, next_phase: int) -> list[int]:
         """Infer which phase(s) this PR is for.
@@ -379,10 +381,10 @@ class EhrProjectStatus:
         last_approval = None
         for phase, prs in sorted(phase_prs.items()):
             for pr in prs:
-                pr_report, approval, summary = self._generate_pr_report(
+                doc_spec, approval, summary = self._generate_pr_report(
                     pr, phase, last_approval
                 )
-                pr_reports.append((phase, pr, pr_report))
+                pr_reports.append((phase, pr, doc_spec))
                 summaries.append(summary)
             if approval and phase < NUM_PHASES:
                 last_approval = approval
