@@ -318,25 +318,25 @@ if __name__ == "__main__":
         row["waiting_for"] = td_to_str(row["waiting_for"])
         row["late_by"] = td_to_str(row["late_by"])
 
-    github_client = GithubClient(organization)
-    response = github_client.read_file("ehr-project-status", "status_summary.csv")
-    sha = response["sha"]
+    # github_client = GithubClient(organization)
+    # response = github_client.read_file("ehr-project-status", "status_summary.csv")
+    # sha = response["sha"]
 
-    # get lead reviewers
-    latest_status_summary = base64.b64decode(response["content"]).decode()
-    reader = csv.DictReader(latest_status_summary.split("\n"))
-    latest_rows = list(reader)
-    lead_reviewer_by_pr = {row["pr"]: row["lead_reviewer"] for row in latest_rows}
-    # update summaries with lead reviewers
-    for row in all_summaries:
-        row["lead_reviewer"] = lead_reviewer_by_pr.get(row["pr"]) or ""
+    # # get lead reviewers
+    # latest_status_summary = base64.b64decode(response["content"]).decode()
+    # reader = csv.DictReader(latest_status_summary.split("\n"))
+    # latest_rows = list(reader)
+    # lead_reviewer_by_pr = {row["pr"]: row["lead_reviewer"] for row in latest_rows}
+    # # update summaries with lead reviewers
+    # for row in all_summaries:
+    #     row["lead_reviewer"] = lead_reviewer_by_pr.get(row["pr"]) or ""
 
-    # write local status_summary.csv
-    with open("outputs/status_summary.csv", "w") as f:
-        writer = csv.DictWriter(f, list(all_summaries[0].keys()))
-        writer.writeheader()
-        writer.writerows(all_summaries)
-    print("outputs/status_summary.csv")
+    # # write local status_summary.csv
+    # with open("outputs/status_summary.csv", "w") as f:
+    #     writer = csv.DictWriter(f, list(all_summaries[0].keys()))
+    #     writer.writeheader()
+    #     writer.writerows(all_summaries)
+    # print("outputs/status_summary.csv")
 
     # # write status_summary.csv to GitHub
     # with open("outputs/status_summary.csv", "rb") as f:
