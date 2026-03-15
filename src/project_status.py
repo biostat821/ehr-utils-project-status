@@ -273,8 +273,7 @@ if __name__ == "__main__":
         students = list(csvreader)
 
     organization = "biostat821-2026"
-    # pr_filename = get_data(organization, students)
-    pr_filename = "pr_cache/pull_requests_20260315092823.json"
+    pr_filename = get_data(organization, students)
 
     with open(pr_filename) as f:
         pr_dicts = json.load(f)
