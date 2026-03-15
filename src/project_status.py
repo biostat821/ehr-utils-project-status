@@ -248,16 +248,22 @@ class EhrProjectStatus:
         return summaries
 
 
-def get_data(organization: str, students: list[dict[str, Any]]) -> str:
+def get_data(
+    organization: str, students: list[dict[str, Any]], cache: bool = False
+) -> str:
     github_client = GithubClient(organization)
     prs = github_client.list_prs([student["username"] for student in students])
-    pr_filename = f"pr_cache/pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
-    with open(pr_filename, "w") as f:
-        json.dump(
-            {username: [pr.to_dict() for pr in prs] for username, prs in prs.items()},
-            f,
-            indent=4,
-        )
+    if cache:
+        pr_filename = f"pr_cache/pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
+        with open(pr_filename, "w") as f:
+            json.dump(
+                {
+                    username: [pr.to_dict() for pr in prs]
+                    for username, prs in prs.items()
+                },
+                f,
+                indent=4,
+            )
     return pr_filename
 
 
