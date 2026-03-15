@@ -13,6 +13,7 @@ import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Self
 from zoneinfo import ZoneInfo
 
@@ -58,6 +59,10 @@ class Extension:
 
 def get_extensions(filename: str) -> list[Extension]:
     """Read extensions from file."""
+    file_path = Path(filename)
+    if not file_path.is_file():
+        return []
+
     with open(filename) as f:
         csvreader = csv.DictReader(f)
         return [
@@ -73,6 +78,10 @@ def get_extensions(filename: str) -> list[Extension]:
 
 def get_phase_mapping_overrides(filename: str) -> dict[str, dict[int, list[int]]]:
     """Read phase mapping overrides from file."""
+    file_path = Path(filename)
+    if not file_path.is_file():
+        return {}
+
     with open(filename) as f:
         csvreader = csv.DictReader(f)
         phase_mapping_overrides: dict[str, dict[int, list[int]]] = defaultdict(
