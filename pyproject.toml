@@ -1,0 +1,33 @@
+[tool.black]
+line-length = 79
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "src"
+]
+
+[tool.mypy]
+explicit_package_bases = true
+ignore_missing_imports = true
+mypy_path = "src"
+namespace_packages = true
+strict = true
+
+[project]
+name = "ehr_utils_project_status"
+version = "2.0.0"
+authors = [
+  { name="Patrick Wang", email="patrick.wang@duke.edu" },
+]
+description = "Tools for understanding the status of EHR utils projects."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+
+[project.urls]
+Homepage = "https://github.com/biostat821/ehr-utils-project-status"
+Issues = "https://github.com/biostat821/ehr-utils-project-status/issues"

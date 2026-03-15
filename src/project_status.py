@@ -251,9 +251,7 @@ class EhrProjectStatus:
 def get_data(organization, students) -> str:
     github_client = GithubClient(organization)
     prs = github_client.list_prs([student["username"] for student in students])
-    pr_filename = (
-        f"pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
-    )
+    pr_filename = f"pr_cache/pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
     with open(pr_filename, "w") as f:
         json.dump(
             {username: [pr.to_dict() for pr in prs] for username, prs in prs.items()},
@@ -275,7 +273,8 @@ if __name__ == "__main__":
         students = list(csvreader)
 
     organization = "biostat821-2026"
-    pr_filename = get_data(organization, students)
+    # pr_filename = get_data(organization, students)
+    pr_filename = "pr_cache/pull_requests_20260315092823.json"
 
     with open(pr_filename) as f:
         pr_dicts = json.load(f)
@@ -334,7 +333,7 @@ if __name__ == "__main__":
         writer.writerows(all_summaries)
     print("outputs/status_summary.csv")
 
-    # write status_summary.csv to GitHub
-    with open("outputs/status_summary.csv", "rb") as f:
-        content = f.read()
-    github_client.upload_file("ehr-project-status", "status_summary.csv", sha, content)
+    # # write status_summary.csv to GitHub
+    # with open("outputs/status_summary.csv", "rb") as f:
+    #     content = f.read()
+    # github_client.upload_file("ehr-project-status", "status_summary.csv", sha, content)
