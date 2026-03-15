@@ -429,6 +429,8 @@ class GithubClient:
                         break
                     print(f"Trying again in {timeout_seconds} seconds...")
                     time.sleep(timeout_seconds)
+                if timeout_seconds == 16:
+                    raise RuntimeError(f"Failed to use API: {response.json()}")
                 for username, repo_name in repos_by_username.items():
                     repo_data = response.json()["data"][repo_name]
                     if repo_data is None:
