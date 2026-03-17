@@ -26,8 +26,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        python -m project_status --username=${{  env.USERNAME  }}
-        typst compile outputs/${{ env.USERNAME }}.typ outputs/ehr-utils-${{ env.USERNAME }}_report_${{ env.TIMESTAMP }}.pdf
+        python -m project_status --username=nancy-54
+        typst compile outputs/nancy-54.typ outputs/ehr-utils-nancy-54_report_${{ env.TIMESTAMP }}.pdf
 
     - name: Upload PDF report
       uses: actions/upload-artifact@v4
