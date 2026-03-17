@@ -110,6 +110,7 @@ class EhrProjectStatus:
         name: str,
         prs: dict[str, list[PullRequest]],
         outputs_path: Path,
+        cache_path: Path = Path("pr_cache"),
     ):
         """Initialize."""
         self.username = username
@@ -123,6 +124,8 @@ class EhrProjectStatus:
         )
         self.prs = prs
         self.outputs_path = outputs_path
+        self.cache_path = cache_path
+        self.cache_path.mkdir(parents=True, exist_ok=True)
 
     start_time = datetime(2026, 2, 13, 23, 59, 59, tzinfo=ZoneInfo("America/New_York"))
     phase_time_budget = timedelta(days=7)
@@ -256,18 +259,30 @@ class EhrProjectStatus:
                 last_approval = None
 
         write_document(self.username, pr_reports, self.outputs_path)
+
         return summaries
 
 
 def get_data(
-    organization: str, students: list[dict[str, Any]], cache: bool = False
-) -> tuple[dict[str, Any], str | None]:
+    organization: str, students: list[dict[str, Any]], cache_path: Path | None = None
+) -> tuple[dict[str, Any], Path | None]:
+    if cache_path:
+        # get latest file
+        latest_file = max(
+            cache_path.glob("*.json"), key=lambda file: file.name
+        ).resolve()
+        with open(latest_file) as f:
+            return json.load(f), latest_file
+
     github_client = GithubClient(organization)
     prs = github_client.list_prs([student["username"] for student in students])
     pr_dicts = {username: [pr.to_dict() for pr in prs] for username, prs in prs.items()}
     pr_filename = None
-    if cache:
-        pr_filename = f"pr_cache/pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
+    if cache_path:
+        pr_filename = (
+            cache_path
+            / f"pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
+        )
         with open(pr_filename, "w") as f:
             json.dump(
                 pr_dicts,
@@ -284,20 +299,19 @@ if __name__ == "__main__":
     )
     parser.add_argument("--filename")
     parser.add_argument("--username")
+    parser.add_argument("--use_cache", action="store_true")
     args = parser.parse_args()
     if args.filename:
         with open(args.filename) as f:
             csvreader = csv.DictReader(f)
             students = list(csvreader)
-            print(f"Got students: {students}")
     elif args.username:
         students = [{"email": "", "name": "", "username": args.username}]
 
     organization = "biostat821-2026"
-    pr_dicts, pr_filename = get_data(organization, students)
-    # pr_filename = "pr_cache/pull_requests_20260315092823.json"
-    # with open(pr_filename) as f:
-    #     pr_dicts = json.load(f)
+    pr_dicts, _ = get_data(
+        organization, students, cache_path=Path("pr_cache") if args.use_cache else None
+    )
 
     prs = {
         username: [PullRequest.from_dict(pr) for pr in prs]
