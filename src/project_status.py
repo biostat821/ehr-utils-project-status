@@ -168,11 +168,6 @@ class EhrProjectStatus:
             late_by,
             points_deducted,
         )
-        if points_deducted is not None:
-            with open(self.outputs_path / "_summary.csv", "a") as f:
-                f.write(
-                    f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - points_deducted}\n'
-                )
         waiting_for = timedelta(0)
         if (
             pr_state_machine.last_review_requested
@@ -253,6 +248,11 @@ class EhrProjectStatus:
                 )
                 pr_reports.append((phase, pr, doc_spec))
                 summaries.append(summary)
+                if doc_spec.points_deducted is not None:
+                    with open(self.outputs_path / "_summary.csv", "a") as f:
+                        f.write(
+                            f'"{self.name}",{self.username},{phase},{pr.permalink},{100 - doc_spec.points_deducted}\n'
+                        )
             if approval and phase < NUM_PHASES:
                 last_approval = approval
             else:
