@@ -18,7 +18,7 @@ jobs:
 
     - name: Get username and timestamp
       run: |
-        echo "USERNAME=${GITHUB_REPOSITORY#biostat821-2026/ehr-utils-}" >> $GITHUB_ENV
+        echo "USERNAME=${GITHUB_REPOSITORY_OWNER}" >> $GITHUB_ENV
         TIMESTAMP=$(date +'%Y%m%d%H%M%S')
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
 
