@@ -84,7 +84,6 @@ def write_document(
     filename = outputs_path / f"{username}.typ"
     with open(filename, "w") as f:
         f.write(document)
-        print(f"Wrote {filename}.")
 
 
 status_col_width = 17
