@@ -292,6 +292,52 @@ def get_data(
     return pr_dicts, pr_filename
 
 
+def push_summaries(all_summaries: list[dict[str, Any]]) -> None:
+    # sort status_summary rows by:
+    # - state: under review, under development, merged, then closed
+    # - waiting_for (decreasing)
+    # - username
+    # - pr (decreasing)
+    all_summaries = sorted(
+        all_summaries,
+        key=lambda row: (
+            row["state"],
+            row["waiting_for"],
+            row["username"],
+            row["pr"],
+        ),
+        reverse=True,
+    )
+    for row in all_summaries:
+        row["waiting_for"] = td_to_str(row["waiting_for"])
+        row["late_by"] = td_to_str(row["late_by"])
+
+    github_client = GithubClient(organization)
+    response = github_client.read_file("ehr-project-status", "status_summary.csv")
+    sha = response["sha"]
+
+    # get lead reviewers
+    latest_status_summary = base64.b64decode(response["content"]).decode()
+    reader = csv.DictReader(latest_status_summary.split("\n"))
+    latest_rows = list(reader)
+    lead_reviewer_by_pr = {row["pr"]: row["lead_reviewer"] for row in latest_rows}
+    # update summaries with lead reviewers
+    for row in all_summaries:
+        row["lead_reviewer"] = lead_reviewer_by_pr.get(row["pr"]) or ""
+
+    # write local status_summary.csv
+    with open("outputs/status_summary.csv", "w") as f:
+        writer = csv.DictWriter(f, list(all_summaries[0].keys()))
+        writer.writeheader()
+        writer.writerows(all_summaries)
+    print("outputs/status_summary.csv")
+
+    # write status_summary.csv to GitHub
+    with open("outputs/status_summary.csv", "rb") as f:
+        content = f.read()
+    github_client.upload_file("ehr-project-status", "status_summary.csv", sha, content)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="ProjectStatus",
@@ -300,6 +346,7 @@ if __name__ == "__main__":
     parser.add_argument("--filename")
     parser.add_argument("--username")
     parser.add_argument("--use_cache", action="store_true")
+    parser.add_argument("--push_summaries", action="store_true")
     args = parser.parse_args()
     if args.filename:
         with open(args.filename) as f:
@@ -331,46 +378,5 @@ if __name__ == "__main__":
         print("Failed to generate PR reports:")
         traceback.print_exc()
 
-    # sort status_summary rows by:
-    # - state: under review, under development, merged, then closed
-    # - waiting_for (decreasing)
-    # - username
-    # - pr (decreasing)
-    all_summaries = sorted(
-        all_summaries,
-        key=lambda row: (
-            row["state"],
-            row["waiting_for"],
-            row["username"],
-            row["pr"],
-        ),
-        reverse=True,
-    )
-    for row in all_summaries:
-        row["waiting_for"] = td_to_str(row["waiting_for"])
-        row["late_by"] = td_to_str(row["late_by"])
-
-    # github_client = GithubClient(organization)
-    # response = github_client.read_file("ehr-project-status", "status_summary.csv")
-    # sha = response["sha"]
-
-    # # get lead reviewers
-    # latest_status_summary = base64.b64decode(response["content"]).decode()
-    # reader = csv.DictReader(latest_status_summary.split("\n"))
-    # latest_rows = list(reader)
-    # lead_reviewer_by_pr = {row["pr"]: row["lead_reviewer"] for row in latest_rows}
-    # # update summaries with lead reviewers
-    # for row in all_summaries:
-    #     row["lead_reviewer"] = lead_reviewer_by_pr.get(row["pr"]) or ""
-
-    # # write local status_summary.csv
-    # with open("outputs/status_summary.csv", "w") as f:
-    #     writer = csv.DictWriter(f, list(all_summaries[0].keys()))
-    #     writer.writeheader()
-    #     writer.writerows(all_summaries)
-    # print("outputs/status_summary.csv")
-
-    # # write status_summary.csv to GitHub
-    # with open("outputs/status_summary.csv", "rb") as f:
-    #     content = f.read()
-    # github_client.upload_file("ehr-project-status", "status_summary.csv", sha, content)
+    if args.push_summaries:
+        push_summaries(all_summaries)
