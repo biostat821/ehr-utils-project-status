@@ -63,7 +63,7 @@ def write_document(
                 \\fancyhead{{}} \\fancyfoot{{}}
                 \\fancyhead[L]{{\\setfont {now().strftime("%Y-%m-%d %H:%M:%S")}}}
                 \\fancyhead[C]{{\\setfont {username}}}
-                \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v2.0.0}}{{ehr-utils-project-status 2.0.0}}}}
+                \\fancyhead[R]{{\\setfont \\href{{https://github.com/biostat821/ehr-utils-project-status/tree/v2.0.1}}{{ehr-utils-project-status 2.0.1}}}}
                 \\ttfamily
                 \\fontseries{{l}}\\selectfont
                 \\small""").strip()
