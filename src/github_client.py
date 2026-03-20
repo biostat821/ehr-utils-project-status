@@ -60,6 +60,7 @@ class PullRequest:
     based_on_main: bool
     behind_base: bool
     timeline_events: list[Event]
+    files: list[str]
 
     @staticmethod
     def from_github_dict(
@@ -88,9 +89,10 @@ class PullRequest:
                 else []
             ),
             timeline_events=parse_events(pr),
+            files=[node["path"] for node in pr["files"]["nodes"]],
         )
 
-    def to_dict(self) -> dict[str, str | int | list[dict[str, str | None]]]:
+    def to_dict(self) -> dict[str, str | int | list[str] | list[dict[str, str | None]]]:
         return {
             "owner": self.owner,
             "branch": self.branch,
@@ -102,6 +104,7 @@ class PullRequest:
             "based_on_main": self.based_on_main,
             "behind_base": self.behind_base,
             "timeline_events": [event.to_dict() for event in self.timeline_events],
+            "files": self.files,
         }
 
     @staticmethod
@@ -120,7 +123,13 @@ class PullRequest:
                 Event.from_dict(event_dict)
                 for event_dict in serialized["timeline_events"]
             ],
+            files=serialized["files"],
         )
+
+    @property
+    def just_workflows(self: Self) -> bool:
+        """Returns True iff the PR only edits workflow files."""
+        return all(file.startswith(".github/workflows/") for file in self.files)
 
 
 def get_event(timeline_item: dict[str, Any]) -> Event:
@@ -347,6 +356,11 @@ class GithubClient:
                                             }}
                                         }}
                                     }}
+                                }}
+                                files(first: 100) {{
+                                  nodes {{
+                                    path
+                                  }}
                                 }}
                                 timelineItems(last: 100) {{
                                     edges {{

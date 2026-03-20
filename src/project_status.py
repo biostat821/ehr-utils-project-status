@@ -206,7 +206,11 @@ class EhrProjectStatus:
         return [next_phase]
 
     def _get_phase_prs(self: Self) -> dict[int, list[PullRequest]]:
-        prs = [pr for pr in self.prs[self.username] if pr.based_on_main]
+        prs = [
+            pr
+            for pr in self.prs[self.username]
+            if pr.based_on_main and not pr.just_workflows
+        ]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > NUM_PHASES:
