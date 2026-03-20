@@ -264,9 +264,10 @@ class EhrProjectStatus:
 
 
 def get_data(
-    organization: str, students: list[dict[str, Any]], cache_path: Path | None = None
+    organization: str, students: list[dict[str, Any]], use_cache: bool = False
 ) -> tuple[dict[str, Any], Path | None]:
-    if cache_path:
+    cache_path = Path("pr_cache")
+    if use_cache:
         # get latest file
         latest_file = max(
             cache_path.glob("*.json"), key=lambda file: file.name
@@ -278,17 +279,16 @@ def get_data(
     prs = github_client.list_prs([student["username"] for student in students])
     pr_dicts = {username: [pr.to_dict() for pr in prs] for username, prs in prs.items()}
     pr_filename = None
-    if cache_path:
-        pr_filename = (
-            cache_path
-            / f"pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
+    pr_filename = (
+        cache_path
+        / f"pull_requests_{datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')}.json"
+    )
+    with open(pr_filename, "w") as f:
+        json.dump(
+            pr_dicts,
+            f,
+            indent=4,
         )
-        with open(pr_filename, "w") as f:
-            json.dump(
-                pr_dicts,
-                f,
-                indent=4,
-            )
     return pr_dicts, pr_filename
 
 
@@ -356,9 +356,7 @@ if __name__ == "__main__":
         students = [{"email": "", "name": "", "username": args.username}]
 
     organization = "biostat821-2026"
-    pr_dicts, _ = get_data(
-        organization, students, cache_path=Path("pr_cache") if args.use_cache else None
-    )
+    pr_dicts, _ = get_data(organization, students, args.use_cache)
 
     prs = {
         username: [PullRequest.from_dict(pr) for pr in prs]
