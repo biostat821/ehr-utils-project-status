@@ -236,6 +236,7 @@ def parse_events(pr: dict[str, Any]) -> list[Event]:
             "HeadRefForcePushedEvent",  # ???
             "HeadRefRestoredEvent",  # ???
             "CrossReferencedEvent",  # ???
+            "BaseRefChangedEvent",  # ???
             "CommentDeletedEvent",  # ignore these
             "RenamedTitleEvent",  # ignore these
             "PullRequestReview",
