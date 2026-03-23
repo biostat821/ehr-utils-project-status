@@ -271,6 +271,7 @@ def get_data(
     organization: str, students: list[dict[str, Any]], use_cache: bool = False
 ) -> tuple[dict[str, Any], Path | None]:
     cache_path = Path("pr_cache")
+    cache_path.mkdir(parents=True, exist_ok=True)
     if use_cache:
         # get latest file
         latest_file = max(
