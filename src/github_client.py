@@ -427,7 +427,7 @@ class GithubClient:
         """Get data for PRs."""
         results: dict[str, list[PullRequest]] = dict()
         start_idx = 0
-        batch_size = 10
+        batch_size = 5
 
         with tqdm(total=len(usernames)) as pbar:
             while start_idx < len(usernames):
