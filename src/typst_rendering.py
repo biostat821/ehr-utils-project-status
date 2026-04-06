@@ -1,3 +1,4 @@
+from datetime import timedelta
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ def _pad_to(x: Any, n: int) -> str:
         return "~" * padding + x_str
 
 
-def _create_page_header(phase: int, pr: PullRequest) -> str:
+def _create_page_header(phase: int, pr: PullRequest, extension: timedelta | None) -> str:
     return (
         "*pull request*: \\\n"
         + f'"{pr.title}" (branch "{pr.branch}") \\\n'
@@ -31,6 +32,12 @@ def _create_page_header(phase: int, pr: PullRequest) -> str:
             if phase in PHASES
             else ""
         )
+        + (
+            "\n"
+            + f"*extension*: {extension.days} days\n"
+            if extension
+            else ""
+        )
     )
 
 
@@ -40,8 +47,8 @@ def write_document(
     outputs_path: Path,
 ) -> None:
     pages = [
-        _create_page_header(phase, pr) + _construct_pr_report(pr_report)
-        for phase, pr, pr_report in pr_reports
+        _create_page_header(phase, pr, doc_spec.extensions.get(phase)) + _construct_pr_report(doc_spec)
+        for phase, pr, doc_spec in pr_reports
     ]
     document = (
         textwrap.dedent(f"""    

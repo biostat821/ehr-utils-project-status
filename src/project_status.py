@@ -54,23 +54,22 @@ class Extension:
     name: str
     username: str
     phase: int
-    due_date: datetime
+    days: int
 
 
-def get_extensions(filename: str) -> list[Extension]:
+def get_extensions(file_path: Path) -> list[Extension]:
     """Read extensions from file."""
-    file_path = Path(filename)
     if not file_path.is_file():
         return []
 
-    with open(filename) as f:
+    with open(file_path) as f:
         csvreader = csv.DictReader(f)
         return [
             Extension(
                 row["name"],
                 row["username"],
                 int(row["phase"]),
-                et_datetime(row["due"]),
+                int(row["days"]),
             )
             for row in csvreader
         ]
@@ -94,13 +93,6 @@ def get_phase_mapping_overrides(filename: str) -> dict[str, dict[int, list[int]]
     return phase_mapping_overrides
 
 
-@dataclass
-class DueDate:
-    due_date: datetime
-    original_due_date: datetime
-    extension: Extension | None
-
-
 class EhrProjectStatus:
     """Multitool for managing EHR projects on GitHub."""
 
@@ -111,13 +103,15 @@ class EhrProjectStatus:
         prs: dict[str, list[PullRequest]],
         outputs_path: Path,
         cache_path: Path = Path("pr_cache"),
+        extensions_path: Path = Path("extensions.csv"),
     ):
         """Initialize."""
         self.username = username
         self.name = name
         self.extensions = {
-            (extension.username, extension.phase): extension
-            for extension in get_extensions("extensions.csv")
+            extension.phase: extension
+            for extension in get_extensions(extensions_path)
+            if extension.username == username
         }
         self.phase_mapping_overrides = get_phase_mapping_overrides(
             "phase_mapping_overrides.csv"
@@ -133,7 +127,7 @@ class EhrProjectStatus:
     def _generate_pr_report(
         self,
         pr: PullRequest,
-        phase: int | None = None,
+        phase: int,
         last_approval: datetime | None = None,
     ) -> tuple[DocumentSpec, datetime | None, dict[str, Any]]:
         """Generate PR summary."""
@@ -153,8 +147,9 @@ class EhrProjectStatus:
         )
         entries, approval = pr_state_machine.process_events(all_events)
 
+        extension_time = timedelta(days=extension.days if (extension := self.extensions.get(phase)) is not None else 0)
         late_by = (
-            pr_state_machine.total_under_development_duration - self.phase_time_budget
+            pr_state_machine.total_under_development_duration - self.phase_time_budget - extension_time
         )
         if pr_state_machine.finish_time:
             points_deducted = max(math.ceil(late_by / timedelta(days=1)), 0)
@@ -167,6 +162,7 @@ class EhrProjectStatus:
             pr_state_machine.total_under_review_duration,
             late_by,
             points_deducted,
+            {phase: extension_time} if extension_time else {},
         )
         waiting_for = timedelta(0)
         if (
@@ -350,6 +346,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--filename")
     parser.add_argument("--username")
+    parser.add_argument("--extensions_path", default="extensions.csv")
     parser.add_argument("--use_cache", action="store_true")
     parser.add_argument("--push_summaries", action="store_true")
     args = parser.parse_args()
@@ -374,7 +371,8 @@ if __name__ == "__main__":
     try:
         for student in students:
             summaries = EhrProjectStatus(
-                student["username"], student["name"], prs, outputs_path=outputs_path
+                student["username"], student["name"], prs, outputs_path=outputs_path,
+                extensions_path=Path(args.extensions_path)
             ).generate_project_report()
             all_summaries.extend(summaries)
     except Exception:

@@ -33,6 +33,7 @@ class DocumentSpec:
     total_under_review_duration: timedelta
     late_by: timedelta | None
     points_deducted: int | None
+    extensions: dict[int, timedelta]
 
 
 def now() -> datetime:
