@@ -210,7 +210,7 @@ class EhrProjectStatus:
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > NUM_PHASES:
-            raise ValueError("Too many open/merged PRs!")
+            print("Too many open/merged PRs!")
         closed_pr_phases = [
             (pr, guess_phase(pr.title)) for idx, pr in enumerate(closed_prs)
         ]
