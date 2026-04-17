@@ -161,9 +161,15 @@ class EhrProjectStatus:
         )
         entries, approval = pr_state_machine.process_events(all_events)
 
-        extension_time = timedelta(days=extension.days if (extension := self.extensions.get(phase)) is not None else 0)
+        extension_time = timedelta(
+            days=extension.days
+            if (extension := self.extensions.get(phase)) is not None
+            else 0
+        )
         late_by = (
-            pr_state_machine.total_under_development_duration - self.phase_time_budget - extension_time
+            pr_state_machine.total_under_development_duration
+            - self.phase_time_budget
+            - extension_time
         )
         if pr_state_machine.finish_time:
             points_deducted = max(math.ceil(late_by / timedelta(days=1)), 0)
@@ -395,8 +401,11 @@ if __name__ == "__main__":
     try:
         for student in students:
             summaries = EhrProjectStatus(
-                student["username"], student["name"], prs, outputs_path=outputs_path,
-                extensions_path=Path(args.extensions_path)
+                student["username"],
+                student["name"],
+                prs,
+                outputs_path=outputs_path,
+                extensions_path=Path(args.extensions_path),
             ).generate_project_report()
             all_summaries.extend(summaries)
     except Exception:
