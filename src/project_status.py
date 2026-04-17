@@ -25,8 +25,16 @@ from github_client import (
 
 # from latex_rendering import write_document
 from typst_rendering import write_document
-from pr_state_machine import PrStateMachine
-from project_util import NUM_PHASES, PHASES, DocumentSpec, PrState, now, td_to_str
+from pr_state_machine import PrStateMachine, PAUSES
+from project_util import (
+    NUM_PHASES,
+    PHASES,
+    DocumentSpec,
+    PrState,
+    now,
+    td_to_str,
+    Period,
+)
 
 
 def guess_phase(pr_title: str) -> int | None:
@@ -156,6 +164,8 @@ class EhrProjectStatus:
         else:
             points_deducted = None
 
+        entry_timestamps = [entry.timestamp for entry in entries]
+        pr_period = Period(min(entry_timestamps), max(entry_timestamps))
         doc_spec = DocumentSpec(
             entries,
             pr_state_machine.total_under_development_duration,
@@ -163,6 +173,11 @@ class EhrProjectStatus:
             late_by,
             points_deducted,
             {phase: extension_time} if extension_time else {},
+            {
+                pause_name: period
+                for pause_name, period in PAUSES.items()
+                if (period - pr_period) < period.duration
+            },
         )
         waiting_for = timedelta(0)
         if (

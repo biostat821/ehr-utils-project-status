@@ -1,10 +1,10 @@
 from datetime import timedelta
 import textwrap
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from github_client import PullRequest
-from project_util import PHASES, DocumentSpec, now, td_to_str
+from project_util import PHASES, DocumentSpec, now, td_to_str, Period, dt_to_str
 
 
 def _pad_to(x: Any, n: int) -> str:
@@ -20,7 +20,12 @@ def _pad_to(x: Any, n: int) -> str:
         return "~" * padding + x_str
 
 
-def _create_page_header(phase: int, pr: PullRequest, extension: timedelta | None) -> str:
+def _create_page_header(
+    phase: int,
+    pr: PullRequest,
+    extension: timedelta | None,
+    pauses: Mapping[str, Period],
+) -> str:
     return (
         "*pull request*: \\\n"
         + f'"{pr.title}" (branch "{pr.branch}") \\\n'
@@ -32,10 +37,16 @@ def _create_page_header(phase: int, pr: PullRequest, extension: timedelta | None
             if phase in PHASES
             else ""
         )
+        + ("\n" + f"*extension*: {extension.days} days\n" if extension else "")
         + (
             "\n"
-            + f"*extension*: {extension.days} days\n"
-            if extension
+            + "*pauses in effect*: \\\n  "
+            + "\n".join(
+                f"- {pause_name} ({dt_to_str(period.start)} - {dt_to_str(period.end)})"
+                for pause_name, period in pauses.items()
+            )
+            + "\n"
+            if pauses
             else ""
         )
     )
@@ -47,7 +58,8 @@ def write_document(
     outputs_path: Path,
 ) -> None:
     pages = [
-        _create_page_header(phase, pr, doc_spec.extensions.get(phase)) + _construct_pr_report(doc_spec)
+        _create_page_header(phase, pr, doc_spec.extensions.get(phase), doc_spec.pauses)
+        + _construct_pr_report(doc_spec)
         for phase, pr, doc_spec in pr_reports
     ]
     document = (
@@ -112,7 +124,7 @@ def _construct_pr_report(documentSpec: DocumentSpec) -> str:
         + "\n"
     )
     for entry in documentSpec.entries:
-        timestamp = entry.timestamp
+        timestamp = dt_to_str(entry.timestamp)
         event_summary = entry.summary
         previous_state = entry.previous_state
         elapsed_in_state = entry.elapsed_in_state

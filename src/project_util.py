@@ -22,7 +22,7 @@ class PrState(Enum):
 
 @dataclass
 class Entry:
-    timestamp: str
+    timestamp: datetime
     summary: str
     previous_state: PrState
     elapsed_in_state: timedelta | None
@@ -60,6 +60,7 @@ class DocumentSpec:
     late_by: timedelta | None
     points_deducted: int | None
     extensions: dict[int, timedelta]
+    pauses: dict[str, Period]
 
 
 def now() -> datetime:
@@ -96,3 +97,8 @@ def str_to_td(string: str) -> timedelta:
 
     h, m, s = map(float, time_str.split(":"))
     return timedelta(days=days, hours=h, minutes=m, seconds=s)
+
+
+def dt_to_str(dt: datetime) -> str:
+    """Convert datetime to string."""
+    return dt.strftime("%Y-%m-%d %H:%M:%S")

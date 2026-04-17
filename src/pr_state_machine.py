@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from github_client import Event
 from project_util import Entry, Period, PrState
 
-_PAUSES = {
+PAUSES = {
     "spring break": Period(
         datetime(2026, 3, 6, hour=19, tzinfo=ZoneInfo("America/New_York")),
         datetime(2026, 3, 16, hour=8, minute=30, tzinfo=ZoneInfo("America/New_York")),
@@ -129,7 +129,7 @@ class PrStateMachine:
             self.total_under_review_duration += elapsed_in_state
         elif self.previous_state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += (
-                in_state_period - _PAUSES["spring break"]
+                in_state_period - PAUSES["spring break"]
             )
 
         return elapsed_in_state
@@ -138,7 +138,7 @@ class PrStateMachine:
         in_state_period = Period(self.last_state_change_time, now())
         if self.state == PrState.UNDER_DEVELOPMENT:
             self.total_under_development_duration += (
-                in_state_period - _PAUSES["spring break"]
+                in_state_period - PAUSES["spring break"]
             )
         elif self.state == PrState.UNDER_REVIEW:
             self.total_under_review_duration += in_state_period.duration
@@ -177,7 +177,7 @@ class PrStateMachine:
                 approval = event.created_at
             entries.append(
                 Entry(
-                    event.creation_time,
+                    event.created_at,
                     event.get_summary(),
                     self.previous_state,
                     elapsed_in_state,
