@@ -226,7 +226,7 @@ class EhrProjectStatus:
         prs = [
             pr
             for pr in self.prs[self.username]
-            if pr.based_on_main and not pr.just_workflows
+            if pr.based_on_main and not (pr.just_workflows or pr.just_markdown)
         ]
         not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]

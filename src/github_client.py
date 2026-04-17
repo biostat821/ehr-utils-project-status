@@ -131,6 +131,11 @@ class PullRequest:
         """Returns True iff the PR only edits workflow files."""
         return all(file.startswith(".github/workflows/") for file in self.files)
 
+    @property
+    def just_markdown(self: Self) -> bool:
+        """Returns True iff the PR only edits markdown files."""
+        return all(file.endswith(".md") for file in self.files)
+
 
 def get_event(timeline_item: dict[str, Any]) -> Event:
     # DISMISSED is also considered approval in case a review was APPROVED and subsequently DISMISSED.
