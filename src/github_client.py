@@ -26,7 +26,7 @@ class Event:
     reviewer: str | None = None
 
     def get_summary(self: Self, verbose: bool = False) -> str:
-        return f"{self.type}{f' from {self.reviewer}' if self.reviewer else ''}"
+        return f"{self.type}{f' ({self.reviewer})' if self.reviewer else ''}"
 
     @property
     def creation_time(self: Self) -> str:
