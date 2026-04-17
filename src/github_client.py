@@ -76,14 +76,15 @@ class PullRequest:
             state=pr["state"],
             # baseRef can be None if the base branch has been deleted
             based_on_main=(
-                base_id := pr["baseRef"]["target"]["id"] if pr["baseRef"] else None
+                base_id := pr["baseRef"]["target"]["oid"] if pr["baseRef"] else None
             )
             == main_id,
             behind_base=base_id
             not in (
                 [
-                    node["id"]
-                    for node in pr["commits"]["nodes"][0]["commit"]["history"]["nodes"]
+                    parent_commit["oid"]
+                    for node in pr["commits"]["nodes"]
+                    for parent_commit in node["commit"]["parents"]["nodes"]
                 ]
                 if pr["commits"]["nodes"]  # there may be no commits
                 else []
@@ -332,7 +333,7 @@ class GithubClient:
                     defaultBranchRef {{
                         target {{
                             ... on Commit {{
-                                id
+                                oid
                             }}
                         }}
                     }}
@@ -347,17 +348,17 @@ class GithubClient:
                                 baseRef {{
                                     target {{
                                         ... on Commit {{
-                                            id
+                                            oid
                                         }}
                                     }}
                                 }}
                                 headRefName
-                                commits(first: 1) {{
+                                commits(last: 50) {{
                                     nodes {{
                                         commit {{
-                                            history(first: 100) {{
+                                            parents(first: 2) {{
                                                 nodes {{
-                                                    id
+                                                    oid
                                                 }}
                                             }}
                                         }}
@@ -368,7 +369,15 @@ class GithubClient:
                                     path
                                   }}
                                 }}
-                                timelineItems(last: 100) {{
+                                timelineItems(last: 100, itemTypes: [
+                                  PULL_REQUEST_REVIEW,
+                                  REVIEW_REQUESTED_EVENT,
+                                  REVIEW_REQUEST_REMOVED_EVENT,
+                                  REVIEW_DISMISSED_EVENT,
+                                  MERGED_EVENT,
+                                  CLOSED_EVENT,
+                                  REOPENED_EVENT
+                                ]) {{
                                     edges {{
                                         node {{
                                             __typename
@@ -457,7 +466,7 @@ class GithubClient:
                     repo_data = response.json()["data"][repo_name]
                     if repo_data is None:
                         return {}
-                    main_id = repo_data["defaultBranchRef"]["target"]["id"]
+                    main_id = repo_data["defaultBranchRef"]["target"]["oid"]
                     results[username] = sorted(
                         [
                             PullRequest.from_github_dict(

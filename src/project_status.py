@@ -205,6 +205,7 @@ class EhrProjectStatus:
             "state": pr_state_machine.state.value,
             "late_by": late_by,
             "waiting_for": waiting_for,
+            "well_behaved": pr.based_on_main and not pr.behind_base,
             "lead_reviewer": "",
         }
         return doc_spec, approval, summary
