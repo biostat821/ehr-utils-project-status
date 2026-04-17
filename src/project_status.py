@@ -130,6 +130,7 @@ class EhrProjectStatus:
         self.cache_path.mkdir(parents=True, exist_ok=True)
 
     start_time = datetime(2026, 2, 13, 23, 59, 59, tzinfo=ZoneInfo("America/New_York"))
+    cutoff_time = datetime(2026, 4, 15, 23, 59, 59, tzinfo=ZoneInfo("America/New_York"))
     phase_time_budget = timedelta(days=7)
 
     def _generate_pr_report(
@@ -140,9 +141,14 @@ class EhrProjectStatus:
     ) -> tuple[DocumentSpec, datetime | None, dict[str, Any]]:
         """Generate PR summary."""
         phase_start_time = last_approval if last_approval else self.start_time
+        timeline_events = [
+            event
+            for event in pr.timeline_events
+            if event.created_at <= self.cutoff_time
+        ]
         all_events = sorted(
             [Event(pr.created_at, type="CREATED")]
-            + pr.timeline_events
+            + timeline_events
             + (
                 [Event(last_approval, type="PREVIOUS_PHASE_APPROVED")]
                 if last_approval
