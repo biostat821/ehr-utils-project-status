@@ -39,13 +39,9 @@ class ReviewerState(Enum):
 class PrStateMachine:
     """Models PR state transitions."""
 
-    def __init__(
-        self, create_time: datetime, phase_start_time: datetime, should_wait: bool
-    ):
+    def __init__(self, phase_start_time: datetime, should_wait: bool):
         """Initialize."""
-        self._last_state_change_time = (
-            min(create_time, phase_start_time) if phase_start_time else create_time
-        )
+        self._last_state_change_time = phase_start_time
         self.reviewer_states: dict[str, ReviewerState] = defaultdict(
             lambda: ReviewerState.NONE
         )

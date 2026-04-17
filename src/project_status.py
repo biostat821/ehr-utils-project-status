@@ -143,7 +143,7 @@ class EhrProjectStatus:
             key=lambda event: event.created_at,
         )
         pr_state_machine = PrStateMachine(
-            pr.created_at, phase_start_time, should_wait=last_approval is not None
+            phase_start_time, should_wait=last_approval is not None
         )
         entries, approval = pr_state_machine.process_events(all_events)
 
