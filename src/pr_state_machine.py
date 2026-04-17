@@ -3,39 +3,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Self
 from zoneinfo import ZoneInfo
 
 from github_client import Event
-from project_util import Entry, PrState
-
-
-@dataclass
-class Period:
-    start: datetime
-    end: datetime
-
-    @property
-    def duration(self) -> timedelta:
-        return self.end - self.start
-
-    def __str__(self) -> str:
-        return f"[{self.start} -> {self.end})"
-
-    def __sub__(self, other: Period) -> timedelta:
-        """Return time in this period but not in the other period."""
-        if other.start > self.end or self.start > other.end:
-            return self.end - self.start
-        duration = timedelta()
-        if self.start < other.start:
-            duration += other.start - self.start
-        if other.end < self.end:
-            duration += self.end - other.end
-        return duration
-
+from project_util import Entry, Period, PrState
 
 _PAUSES = {
     "spring break": Period(
