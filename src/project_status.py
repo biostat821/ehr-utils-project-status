@@ -228,10 +228,13 @@ class EhrProjectStatus:
             for pr in self.prs[self.username]
             if pr.based_on_main and not (pr.just_workflows or pr.just_markdown)
         ]
-        not_closed_prs = [pr for pr in prs if pr.state != "CLOSED"]
+        # put merged PRs first
+        not_closed_prs = [pr for pr in prs if pr.state == "MERGED"] + [
+            pr for pr in prs if pr.state == "OPEN"
+        ]
         closed_prs = [pr for pr in prs if pr.state == "CLOSED"]
         if len(not_closed_prs) > NUM_PHASES:
-            print("Too many open/merged PRs!")
+            print(f"Too many open/merged PRs ({self.username})!")
         closed_pr_phases = [
             (pr, guess_phase(pr.title)) for idx, pr in enumerate(closed_prs)
         ]
