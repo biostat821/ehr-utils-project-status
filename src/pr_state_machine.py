@@ -107,13 +107,11 @@ class PrStateMachine:
 
     def _update_pr_state(self, event: Event) -> timedelta | None:
         """Update the state in response to a new event."""
-        if self.state == PrState.CLOSED and event.type != "REOPENED":
-            return None
-        elif event.type == "CLOSED":
+        if event.type == "CLOSED":
             if self.state == PrState.MERGED:
                 new_state = PrState.MERGED
             else:
-                new_state = PrState.CLOSED
+                new_state = PrState.UNDER_DEVELOPMENT
         elif event.type == "MERGED":
             new_state = PrState.MERGED
         else:
