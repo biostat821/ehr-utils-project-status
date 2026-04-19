@@ -75,7 +75,7 @@ def write_document(
             #h(1fr)
             {username}
             #h(1fr)
-            #link("https://github.com/biostat821/ehr-utils-project-status/tree/v2.1.1")[ehr-utils-project-status 2.1.1]
+            #link("https://github.com/biostat821/ehr-utils-project-status/tree/v2.2.0")[ehr-utils-project-status 2.2.0]
             #line(length: 100%) 
         ],
         numbering: "1",
